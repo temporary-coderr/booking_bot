@@ -81,6 +81,12 @@ def init_db():
             pair_key TEXT PRIMARY KEY,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            ip_key TEXT PRIMARY KEY,
+            failures INTEGER NOT NULL DEFAULT 0,
+            window_start TEXT NOT NULL,
+            locked_until TEXT
+        );
         """)
         salt_row = conn.execute("SELECT value FROM app_meta WHERE key='admin_salt'").fetchone()
         if not salt_row:
@@ -254,7 +260,7 @@ def create_booking():
         return jsonify(ok=False, error="Please check your name, mobile number and route details."), 400
     try:
         chosen = datetime.strptime(trip_date + " " + trip_time, "%Y-%m-%d %H:%M")
-        if chosen.date() < date.today() or chosen > datetime.now() + timedelta(days=365):
+        if chosen < datetime.now() or chosen > datetime.now() + timedelta(days=365):
             raise ValueError()
     except ValueError:
         return jsonify(ok=False, error="Please choose a valid future date and time."), 400
@@ -302,16 +308,34 @@ def admin_login(token):
         if not ADMIN_PASSWORD or not os.getenv("SECRET_KEY"):
             flash("Admin login is not configured. Set ADMIN_PASSWORD and SECRET_KEY.", "error")
         else:
+            ip_key = hashlib.sha256((str(request.remote_addr or "unknown") + app.config["SECRET_KEY"]).encode()).hexdigest()
             with db() as conn:
+                attempt = conn.execute("SELECT * FROM login_attempts WHERE ip_key=?", (ip_key,)).fetchone()
+                now = datetime.utcnow()
+                if attempt and attempt["locked_until"] and datetime.fromisoformat(attempt["locked_until"]) > now:
+                    flash("Too many attempts. Please wait 15 minutes before trying again.", "error")
+                    return render_template("admin_login.html"), 429
                 salt = conn.execute("SELECT value FROM app_meta WHERE key='admin_salt'").fetchone()["value"]
                 expected = conn.execute("SELECT value FROM app_meta WHERE key='admin_password_hash'").fetchone()
-            supplied = hashlib.pbkdf2_hmac("sha256", request.form.get("password", "").encode(), salt.encode(), PBKDF2_ITERATIONS).hex()
-            if expected and hmac.compare_digest(supplied, expected["value"]):
-                session.clear()
-                session["admin_authenticated"] = True
-                session.permanent = True
-                session["csrf"] = secrets.token_urlsafe(32)
-                return redirect(url_for("admin_dashboard", token=token))
+                supplied = hashlib.pbkdf2_hmac("sha256", request.form.get("password", "").encode(), salt.encode(), PBKDF2_ITERATIONS).hex()
+                if expected and hmac.compare_digest(supplied, expected["value"]):
+                    conn.execute("DELETE FROM login_attempts WHERE ip_key=?", (ip_key,))
+                    session.clear()
+                    session["admin_authenticated"] = True
+                    session.permanent = True
+                    session["csrf"] = secrets.token_urlsafe(32)
+                    return redirect(url_for("admin_dashboard", token=token))
+                window_start = datetime.fromisoformat(attempt["window_start"]) if attempt else now
+                failures = attempt["failures"] if attempt else 0
+                if now - window_start > timedelta(minutes=15):
+                    window_start, failures = now, 0
+                failures += 1
+                locked_until = (now + timedelta(minutes=15)).isoformat() if failures >= 5 else None
+                conn.execute(
+                    "INSERT INTO login_attempts(ip_key,failures,window_start,locked_until) VALUES(?,?,?,?) "
+                    "ON CONFLICT(ip_key) DO UPDATE SET failures=excluded.failures,window_start=excluded.window_start,locked_until=excluded.locked_until",
+                    (ip_key, failures, window_start.isoformat(), locked_until),
+                )
             flash("Incorrect password.", "error")
     return render_template("admin_login.html")
 
