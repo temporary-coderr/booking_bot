@@ -1,4 +1,4 @@
-name: Tests
+name: Netlify project checks
 
 on:
   push:
@@ -11,12 +11,18 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  syntax:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-      - run: pip install -r requirements.txt pytest
-      - run: pytest -q
+          node-version: "22"
+      - name: Check Netlify function syntax
+        run: |
+          node --check netlify/functions/api.mjs
+          node --check netlify/functions/scheduled-match.mjs
+      - name: Check frontend JavaScript syntax
+        run: |
+          node --check public/app.js
+          node --check public/admin.js
