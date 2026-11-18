@@ -142,7 +142,7 @@ export default async (event) => {
     if (method !== "GET" && !safeEqual(event.headers["x-csrf-token"], session.csrf)) return json(403, { ok: false, error: "Security token expired. Refresh the dashboard." });
     if (method === "GET" && path.endsWith("/admin-data")) {
       const [bookings, receivers, notified] = await Promise.all([sheet("list_bookings"), sheet("list_receivers"), sheet("count_notifications")]);
-      return json(200, { ok: true, bookings, receivers, notified: notified.count, matches: findMatches(bookings || []) });
+      return json(200, { ok: true, csrf: session.csrf, bookings, receivers, notified: notified.count, matches: findMatches(bookings || []) });
     }
     if (method === "POST" && path.endsWith("/booking-update")) {
       return json(200, { ok: true, booking: await sheet("update_booking", body) });
