@@ -30,10 +30,10 @@
         "Route: " + item.origin + " → " + item.destination + (item.via ? " via " + item.via : ""),
         "Travel: " + item.trip_date + " at " + item.trip_time,
         "Reference: " + item.reference
-      ].join("\\n");
-      const message = "POSSIBLE DRIVER / CUSTOMER MATCH (" + data.reason + ")\\n\\n" +
-        describe(data.a) + "\\n\\n" + describe(data.b) +
-        "\\n\\nAdmin: review and contact parties manually. Contact numbers are not included.";
+      ].join("\n");
+      const message = "POSSIBLE DRIVER / CUSTOMER MATCH (" + data.reason + ")\n\n" +
+        describe(data.a) + "\n\n" + describe(data.b) +
+        "\n\nAdmin: review and contact parties manually. Contact numbers are not included.";
       try {
         await navigator.clipboard.writeText(message);
         const old = button.textContent;
