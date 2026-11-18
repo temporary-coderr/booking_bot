@@ -5,7 +5,7 @@
       try { data = JSON.parse(button.dataset.copy); } catch { return; }
       const text = [
         data.role + ": " + data.name,
-        "Mobile: " + data.phone,
+        (data.phone ? "Mobile: " + data.phone : null),
         "Route: " + data.origin + " to " + data.destination + (data.via ? " via " + data.via : ""),
         "Date/time: " + data.trip_date + " " + data.trip_time,
         "Reference: " + data.reference
