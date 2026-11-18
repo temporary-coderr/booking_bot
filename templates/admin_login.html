@@ -1,5 +1,0 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Private sign in</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
-<body class="admin-body"><main class="login-card"><div class="brand-mark large">↗</div><span class="eyebrow">PRIVATE ADMIN AREA</span><h1>Administrator sign in</h1><p>This area is restricted. Your password is never stored in the browser.</p>
-{% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="notice {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
-<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Admin password<input type="password" name="password" required autocomplete="current-password" autofocus></label><button class="primary-button" type="submit">Unlock dashboard →</button></form><p class="muted">If you forgot your password, update the ADMIN_PASSWORD deployment secret and restart the service.</p></main></body></html>
