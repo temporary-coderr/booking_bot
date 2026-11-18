@@ -25,7 +25,7 @@
  document.getElementById("booking-list").addEventListener("click",async e=>{
   const edit=e.target.closest("[data-edit]"),toggle=e.target.closest("[data-status]"),del=e.target.closest("[data-delete]");
   try{
-   if(edit){const b=data.bookings.find(x=>String(x.id)===edit.dataset.edit);const fields=["name","phone","origin","destination","via","trip_date","trip_time"];const changes={id:b.id};for(const f of fields){const v=prompt("Update "+f.replace("_"," ")+":",b[f]||"");if(v===null)return;changes[f]=v}await api("booking-update",changes);await refresh()}
+   if(edit){const b=data.bookings.find(x=>String(x.id)===edit.dataset.edit);const fields=["name","phone","origin","destination","via","trip_date","trip_time","vehicle_type","vehicle_number"];const changes={id:b.id};for(const f of fields){const v=prompt("Update "+f.replace("_"," ")+":",b[f]||"");if(v===null)return;changes[f]=v}await api("booking-update",changes);await refresh()}
    if(toggle){const active=toggle.dataset.active!=="false"&&toggle.dataset.active!=="0";await api("booking-status",{id:toggle.dataset.status,active:!active});await refresh()}
    if(del&&confirm("Permanently delete this booking?")){await api("booking-delete",{id:del.dataset.delete,reference:del.dataset.reference});await refresh()}
   }catch(x){status(x.message)}
