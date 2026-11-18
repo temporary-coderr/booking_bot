@@ -1,0 +1,30 @@
+name: Booking match checker
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-matches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required secrets
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          test -n "$APP_BASE_URL" || (echo "APP_BASE_URL secret is missing" && exit 1)
+          test -n "$CRON_SECRET" || (echo "CRON_SECRET secret is missing" && exit 1)
+      - name: Run matching check
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl --fail --silent --show-error \
+            --max-time 30 \
+            -X POST "${APP_BASE_URL%/}/internal/match" \
+            -H "X-Cron-Secret: $CRON_SECRET"
