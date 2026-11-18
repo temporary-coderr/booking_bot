@@ -1,114 +1,30 @@
-const SHEETS = {
-  bookings: "Bookings",
-  receivers: "Receivers",
-  notifications: "Notifications"
-};
-
-function json(data) {
-  return ContentService.createTextOutput(JSON.stringify(data))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-function spreadsheet() {
-  const id = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
-  if (!id) throw new Error("Set SPREADSHEET_ID in Apps Script project properties.");
-  return SpreadsheetApp.openById(id);
-}
-function setup() {
-  const ss = spreadsheet();
-  const headers = {
-    Bookings: ["id","reference","role","name","phone","origin","destination","via","trip_date","trip_time","created_at","active","status"],
-    Receivers: ["id","label","phone","created_at"],
-    Notifications: ["pair","created_at"]
-  };
-  Object.entries(headers).forEach(([name, row]) => {
-    let sh = ss.getSheetByName(name);
-    if (!sh) sh = ss.insertSheet(name);
-    if (sh.getLastRow() === 0) sh.appendRow(row);
-  });
-  return "Sheets initialized";
-}
-function readRows(name) {
-  const sh = spreadsheet().getSheetByName(name);
-  if (!sh || sh.getLastRow() < 2) return [];
-  const values = sh.getDataRange().getValues();
-  const keys = values.shift().map(String);
-  return values.map(row => Object.fromEntries(keys.map((k, i) => [k, row[i] instanceof Date ? Utilities.formatDate(row[i], "GMT", "yyyy-MM-dd'T'HH:mm:ss'Z'") : row[i]])));
-}
-function findRow(name, key, value) {
-  const sh = spreadsheet().getSheetByName(name);
-  if (!sh || sh.getLastRow() < 2) return null;
-  const data = sh.getDataRange().getValues();
-  const idx = data[0].indexOf(key);
-  for (let i = 1; i < data.length; i++) if (String(data[i][idx]) === String(value)) return { sheet: sh, row: i + 1, headers: data[0] };
-  return null;
-}
-function doGet() { return json({ ok: true, service: "Booking Bot Sheets API" }); }
-function doPost(e) {
-  try {
-    const req = JSON.parse(e.postData.contents || "{}");
-    const expected = PropertiesService.getScriptProperties().getProperty("SHEETS_API_SECRET") || "";
-    if (!expected || !req.secret || req.secret !== expected) return json({ ok: false, error: "Unauthorized" });
-    const d = req.data || {};
-    const ss = spreadsheet();
-    const bookings = ss.getSheetByName(SHEETS.bookings);
-    const receivers = ss.getSheetByName(SHEETS.receivers);
-    const notifications = ss.getSheetByName(SHEETS.notifications);
-    let result;
-    switch (req.action) {
-      case "public_config":
-      case "list_receivers":
-        result = { receivers: readRows(SHEETS.receivers) }; break;
-      case "create_booking": {
-        const reference = Utilities.getUuid().replace(/-/g, "").slice(0, 8).toUpperCase();
-        const id = Utilities.getUuid();
-        const row = [id, reference, d.role, d.name, d.phone, d.origin, d.destination, d.via || "", d.trip_date, d.trip_time, new Date().toISOString(), true, "pending"];
-        bookings.appendRow(row);
-        result = { id, reference }; break;
-      }
-      case "list_bookings":
-        result = readRows(SHEETS.bookings).reverse(); break;
-      case "add_receiver": {
-        const id = Utilities.getUuid();
-        receivers.appendRow([id, d.label, d.phone, new Date().toISOString()]);
-        result = { id, label: d.label, phone: d.phone }; break;
-      }
-      case "delete_receiver": {
-        const found = findRow(SHEETS.receivers, "id", d.id);
-        if (found) found.sheet.deleteRow(found.row);
-        result = { deleted: !!found }; break;
-      }
-      case "set_booking_status": {
-        const found = findRow(SHEETS.bookings, "id", d.id);
-        if (!found) throw new Error("Booking not found");
-        const statusCol = found.headers.indexOf("status") + 1;
-        const activeCol = found.headers.indexOf("active") + 1;
-        if (d.status) found.sheet.getRange(found.row, statusCol).setValue(d.status);
-        if (typeof d.active === "boolean") found.sheet.getRange(found.row, activeCol).setValue(d.active);
-        result = { updated: true }; break;
-      }
-      case "update_booking": {
-        const found = findRow(SHEETS.bookings, "id", d.id);
-        if (!found) throw new Error("Booking not found");
-        const allowed = ["name","phone","origin","destination","via","trip_date","trip_time","role"];
-        allowed.forEach(k => { if (d[k] !== undefined) found.sheet.getRange(found.row, found.headers.indexOf(k) + 1).setValue(d[k]); });
-        result = { updated: true }; break;
-      }
-      case "delete_booking": {
-        const found = findRow(SHEETS.bookings, "id", d.id);
-        if (found) found.sheet.deleteRow(found.row);
-        result = { deleted: !!found }; break;
-      }
-      case "notification_exists":
-        result = { exists: readRows(SHEETS.notifications).some(x => x.pair === d.pair) }; break;
-      case "record_notification":
-        notifications.appendRow([d.pair, new Date().toISOString()]);
-        result = { saved: true }; break;
-      case "count_notifications":
-        result = { count: Math.max(0, notifications.getLastRow() - 1) }; break;
-      default: throw new Error("Unknown action");
-    }
-    return json({ ok: true, data: result });
-  } catch (err) {
-    return json({ ok: false, error: err.message || String(err) });
-  }
-}
+const SHEETS={bookings:"Bookings",receivers:"Receivers",notifications:"Notifications",activity:"Activity",settings:"Settings"};
+function json(data){return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON)}
+function spreadsheet(){const id=PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");if(!id)throw Error("Set SPREADSHEET_ID in Script Properties.");return SpreadsheetApp.openById(id)}
+function setup(){const ss=spreadsheet(),headers={Bookings:["id","reference","role","name","phone","origin","destination","via","trip_date","trip_time","created_at","active","status","vehicle_type","vehicle_number","edit_token_hash"],Receivers:["id","label","phone","created_at"],Notifications:["pair","created_at"],Activity:["reference","event","created_at"],Settings:["key","value"]};Object.entries(headers).forEach(([n,h])=>{let s=ss.getSheetByName(n);if(!s)s=ss.insertSheet(n);if(!s.getLastRow())s.appendRow(h)});const sh=ss.getSheetByName("Settings");if(!findRow("Settings","key","expiry_hours"))sh.appendRow(["expiry_hours","12"]);return "Sheets initialized"}
+function readRows(n){const s=spreadsheet().getSheetByName(n);if(!s||s.getLastRow()<2)return[];const v=s.getDataRange().getValues(),h=v.shift().map(String);return v.map(row=>Object.fromEntries(h.map((k,i)=>[k,row[i] instanceof Date?row[i].toISOString():row[i]])))}
+function findRow(n,key,value){const s=spreadsheet().getSheetByName(n);if(!s||s.getLastRow()<2)return null;const d=s.getDataRange().getValues(),i=d[0].indexOf(key);for(let r=1;r<d.length;r++)if(String(d[r][i])===String(value))return{sheet:s,row:r+1,headers:d[0]};return null}
+function recordActivity(ref,event){spreadsheet().getSheetByName(SHEETS.activity).appendRow([ref,event,new Date().toISOString()]);}
+function expireBookings(){const cfg=readRows(SHEETS.settings).find(x=>x.key==="expiry_hours"),hours=[6,12,24].includes(Number(cfg&&cfg.value))?Number(cfg.value):12,sh=spreadsheet().getSheetByName(SHEETS.bookings),rows=readRows(SHEETS.bookings),now=Date.now();let count=0;rows.forEach(b=>{if(String(b.active)!=="false"&&String(b.active)!=="0"&&b.status!=="expired"&&now-new Date(b.created_at).getTime()>=hours*3600000){const f=findRow(SHEETS.bookings,"id",b.id);if(f){f.sheet.getRange(f.row,f.headers.indexOf("active")+1).setValue(false);f.sheet.getRange(f.row,f.headers.indexOf("status")+1).setValue("expired");recordActivity(b.reference,"booking_expired");count++}}});return{count,hours}}
+function doGet(){return json({ok:true,service:"Booking Sheets API"})}
+function doPost(e){const lock=LockService.getScriptLock();try{const req=JSON.parse(e.postData.contents||"{}"),expected=PropertiesService.getScriptProperties().getProperty("SHEETS_API_SECRET")||"";if(!expected||!req.secret||req.secret!==expected)return json({ok:false,error:"Unauthorized"});lock.waitLock(20000);const d=req.data||{},ss=spreadsheet(),bookings=ss.getSheetByName(SHEETS.bookings),receivers=ss.getSheetByName(SHEETS.receivers),notifications=ss.getSheetByName(SHEETS.notifications);let result;
+switch(req.action){
+case"public_config":case"list_receivers":result={receivers:readRows(SHEETS.receivers)};break;
+case"create_booking":{expireBookings();if(readRows(SHEETS.bookings).some(x=>x.phone===String(d.phone)&&String(x.active)!=="false"&&String(x.active)!=="0"&&x.status!=="expired"))throw Error("This mobile number already has an active booking. Use your edit link to update it, or wait until it expires.");const id=Utilities.getUuid(),reference=Utilities.getUuid().replace(/-/g,"").slice(0,8).toUpperCase();bookings.appendRow([id,reference,d.role,d.name,d.phone,d.origin,d.destination,d.via||"",d.trip_date,d.trip_time,new Date().toISOString(),true,"pending",d.vehicle_type||"",d.vehicle_number||"",d.edit_token_hash]);recordActivity(reference,"booking_created");result={id,reference};break}
+case"owner_edit_booking":{expireBookings();const f=findRow(SHEETS.bookings,"reference",d.reference);if(!f)throw Error("Booking not found or expired.");const current=readRows(SHEETS.bookings).find(x=>x.reference===d.reference);if(!current||current.phone!==d.phone||current.edit_token_hash!==d.edit_token_hash||String(current.active)==="false"||current.status==="expired")throw Error("Edit permission not valid. Use the original booking link and mobile number.");if(readRows(SHEETS.bookings).some(x=>x.phone===d.changes.phone&&x.reference!==d.reference&&String(x.active)!=="false"&&String(x.active)!=="0"&&x.status!=="expired"))throw Error("This mobile number already has another active booking.");const allow=["name","phone","origin","destination","via","trip_date","trip_time","vehicle_type","vehicle_number"];allow.forEach(k=>{if(d.changes[k]!==undefined)f.sheet.getRange(f.row,f.headers.indexOf(k)+1).setValue(d.changes[k])});result={updated:true,reference:d.reference};break}
+case"list_bookings":result=readRows(SHEETS.bookings).reverse();break;
+case"add_receiver":{const id=Utilities.getUuid();receivers.appendRow([id,d.label,d.phone,new Date().toISOString()]);result={id,label:d.label,phone:d.phone};break}
+case"delete_receiver":{const f=findRow(SHEETS.receivers,"id",d.id);if(f)f.sheet.deleteRow(f.row);result={deleted:!!f};break}
+case"set_booking_status":{const f=findRow(SHEETS.bookings,"id",d.id);if(!f)throw Error("Booking not found");if(d.status)f.sheet.getRange(f.row,f.headers.indexOf("status")+1).setValue(d.status);if(typeof d.active==="boolean")f.sheet.getRange(f.row,f.headers.indexOf("active")+1).setValue(d.active);result={updated:true};break}
+case"update_booking":{const f=findRow(SHEETS.bookings,"id",d.id);if(!f)throw Error("Booking not found");["name","phone","origin","destination","via","trip_date","trip_time","role","vehicle_type","vehicle_number"].forEach(k=>{if(d[k]!==undefined)f.sheet.getRange(f.row,f.headers.indexOf(k)+1).setValue(d[k])});result={updated:true};break}
+case"delete_booking":{const f=findRow(SHEETS.bookings,"id",d.id);if(f){recordActivity(d.reference||"", "admin_deleted");f.sheet.deleteRow(f.row)}result={deleted:!!f};break}
+case"notification_exists":result={exists:readRows(SHEETS.notifications).some(x=>x.pair===d.pair)};break;
+case"record_notification":notifications.appendRow([d.pair,new Date().toISOString()]);result={saved:true};break;
+case"count_notifications":result={count:Math.max(0,notifications.getLastRow()-1)};break;
+case"record_activity":recordActivity(d.reference,d.event);result={saved:true};break;
+case"list_activity":result=readRows(SHEETS.activity).reverse().slice(0,300);break;
+case"get_settings":{const x=readRows(SHEETS.settings).find(x=>x.key==="expiry_hours");result={expiry_hours:Number(x&&x.value)||12};break}
+case"set_settings":{const f=findRow(SHEETS.settings,"key","expiry_hours");if(f)f.sheet.getRange(f.row,f.headers.indexOf("value")+1).setValue(String(d.expiry_hours));else ss.getSheetByName(SHEETS.settings).appendRow(["expiry_hours",String(d.expiry_hours)]);result={expiry_hours:d.expiry_hours};break}
+case"expire_bookings":result=expireBookings();break;
+default:throw Error("Unknown action")}
+return json({ok:true,data:result})}catch(err){return json({ok:false,error:err.message||String(err)})}finally{try{lock.releaseLock()}catch(_){}}}
