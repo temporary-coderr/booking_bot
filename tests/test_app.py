@@ -1,8 +1,11 @@
 import os
 import re
+import sys
 import tempfile
 from datetime import date, timedelta
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 DB_FILE = Path(tempfile.gettempdir()) / f"booking-bot-tests-{os.getpid()}.sqlite3"
 if DB_FILE.exists():
