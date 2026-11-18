@@ -15,7 +15,7 @@ function matchReason(a,b){const pa=routePoints(a),pb=routePoints(b),sa=new Set(p
 function findMatches(bs){const out=[],active=bs.filter(x=>String(x.active)!=="false"&&String(x.active)!=="0"&&x.status!=="expired");for(let i=0;i<active.length;i++)for(let j=i+1;j<active.length;j++){const a=active[i],b=active[j];if(a.role===b.role||a.trip_date!==b.trip_date)continue;const mins=Math.abs(new Date(a.trip_date+"T"+a.trip_time)-new Date(b.trip_date+"T"+b.trip_time))/60000;if(mins>180)continue;const reason=matchReason(a,b);if(reason)out.push({a,b,reason})}return out}
 async function sendTelegram(text){const t=process.env.TELEGRAM_BOT_TOKEN,c=process.env.TELEGRAM_CHAT_ID;if(!t||!c)return false;const r=await fetch("https://api.telegram.org/bot"+t+"/sendMessage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:c,text,disable_web_page_preview:true})});return r.ok}
 const summary=b=>String(b.role).toUpperCase()+": "+b.name+"\nMobile: "+b.phone+"\nRoute: "+b.origin+" → "+b.destination+(b.via?" via "+b.via:"")+"\nTravel: "+b.trip_date+" at "+b.trip_time+(b.vehicle_type?"\nVehicle: "+b.vehicle_type:"")+(b.capacity_kg?" · Capacity: "+b.capacity_kg+" kg":"")+(b.passenger_count?" · Passengers: "+b.passenger_count:"")+"\nReference: "+b.reference;
-export default async e=>{
+async function handleEvent(e){
  const method=e.httpMethod,body=(()=>{try{return JSON.parse(e.body||"{}")}catch{return{}}})(),path=e.path||"";
  try{
   if(method==="POST"&&path.endsWith("/bookings")){
@@ -62,4 +62,19 @@ export default async e=>{
   if(method==="POST"&&path.endsWith("/receiver-delete")){await sheet("delete_receiver",body);return json(200,{ok:true})}
   return json(404,{ok:false,error:"Not found."});
  }catch(err){console.error("Booking API error:",err);return json(500,{ok:false,error:err.message||"Server error."})}
-};
+}
+
+export default async function handler(request) {
+ const url = new URL(request.url);
+ const event = {
+  httpMethod: request.method,
+  path: url.pathname,
+  headers: Object.fromEntries(request.headers.entries()),
+  body: request.method === "GET" || request.method === "HEAD" ? "" : await request.text()
+ };
+ const result = await handleEvent(event);
+ return new Response(result.body ?? null, {
+  status: result.statusCode || 200,
+  headers: result.headers || {}
+ });
+}
