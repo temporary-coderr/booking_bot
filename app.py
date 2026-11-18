@@ -279,7 +279,6 @@ def create_booking():
         message += f" via {via}"
     message += f"\nDate: {trip_date} | Time: {trip_time}"
     links = [{"label": r["label"], "url": f"https://wa.me/{''.join(c for c in r['phone'] if c.isdigit())}?text={quote(message)}"} for r in receivers]
-    telegram_send("NEW BOOKING\n" + booking_summary({"role": role, "name": name, "origin": origin, "destination": destination, "via": via, "trip_date": trip_date, "trip_time": trip_time, "reference": reference}))
     return jsonify(ok=True, reference=reference, whatsapp_links=links,
                    message="Booking saved successfully. Choose an admin WhatsApp contact if you want to send the booking details."), 201
 
