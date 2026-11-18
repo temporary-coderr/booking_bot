@@ -109,3 +109,10 @@ Change `ADMIN_PASSWORD` in Netlify Site configuration → Environment variables,
 - The post-booking WhatsApp text begins **“Yahan booking hai”** and includes booking type, name, mobile, route, date/time and driver vehicle information when present. The user must press Send in WhatsApp.
 
 Before production, replace the Apps Script code from this repository, run `setup` once to migrate existing sheet headers, and deploy a **new Apps Script web app version**. Update the Netlify environment variable `GOOGLE_SHEET_URL` if the deployment URL changes. Add the five additional Netlify secrets documented above and the GitHub Actions secrets `APP_BASE_URL` and `CRON_SECRET`.
+
+
+### Route and vehicle details
+- Drivers choose TRUCK, PICKUP, CAR or OTHER.
+- Every driver booking records load capacity in kilograms; CAR bookings also record passenger count.
+- A route can include up to five intermediate cities (Via 1–Via 5).
+- Vehicle registration numbers are not collected.
