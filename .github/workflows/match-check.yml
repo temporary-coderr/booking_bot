@@ -24,7 +24,6 @@ jobs:
           APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl --fail --silent --show-error \
-            --max-time 30 \
-            -X POST "${APP_BASE_URL%/}/internal/match" \
-            -H "X-Cron-Secret: $CRON_SECRET"
+          curl --fail --silent --show-error --max-time 45 \
+            -X POST "${APP_BASE_URL%/}/api/match-check" \
+            -H "x-cron-secret: $CRON_SECRET"
