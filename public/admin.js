@@ -34,5 +34,5 @@
  document.getElementById("receiver-form").addEventListener("submit",async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{await api("receiver-add",{label:f.get("label"),phone:f.get("phone")});e.currentTarget.reset();await refresh()}catch(x){status(x.message)}});
  document.getElementById("receiver-list").addEventListener("click",async e=>{const b=e.target.closest("[data-receiver-delete]");if(b&&confirm("Remove this WhatsApp receiver?")){try{await api("receiver-delete",{id:b.dataset.receiverDelete});await refresh()}catch(x){status(x.message)}}});
  if(!token){login.hidden=false;return}
- api("admin-data").then(j=>{dash.hidden=false;csrf="";data=j;render();status("Read-only session check. Sign in to manage bookings.")}).catch(()=>{login.hidden=false});
+ api("admin-data").then(j=>{dash.hidden=false;csrf=j.csrf||"";data=j;render();status("Read-only session check. Sign in to manage bookings.")}).catch(()=>{login.hidden=false});
 })();
