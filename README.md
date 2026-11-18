@@ -8,7 +8,7 @@ Mobile-first driver/customer booking platform using Netlify, Google Sheets, Tele
 - **Google Sheets** stores bookings, WhatsApp receivers and match-notification history.
 - **Telegram** sends private admin-only match alerts.
 - **WhatsApp** uses official click-to-chat links. The person must review and press Send; the app never sends WhatsApp messages automatically.
-- **GitHub Actions** runs the matching check every five minutes.
+- **GitHub Actions** runs matching and expiry checks every five minutes.
 
 The public page is `public/index.html`. Netlify publishes the `public/` directory. The old Flask/SQLite/Render deployment is no longer the active architecture.
 
@@ -71,7 +71,7 @@ Keep the token private. The admin page is not linked from the public booking pag
 - Change status: pending, approved, rejected or completed.
 - Activate/deactivate or permanently delete bookings.
 - Review route/date/time matches and manually contact either party.
-- Add/remove WhatsApp receivers shown after successful public bookings.
+- Add/remove WhatsApp receivers used by the post-booking share button.\n- See booking visitor activity, edits, auto-deletions and WhatsApp link opens. A link-open event is not proof that the WhatsApp message was sent.
 - View total bookings, active bookings, possible matches and notification count.
 - Log out; the signed admin session expires after eight hours.
 
