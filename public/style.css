@@ -75,3 +75,6 @@ body.public-home{background:#06150f;color:#f5faf6;font-family:'DM Sans','Noto Sa
 .text-button{border:0;background:none;color:#20d978;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;text-decoration:underline}
 .public-home footer{color:#759282}
 @media(max-width:520px){.public-home .topbar{padding:9px 14px;min-height:72px}.public-home .brand-logo{width:148px}.lang-button{padding:9px 11px}.public-home .shell{margin:18px auto}.public-home .panel{padding:15px}.public-home .role-option{gap:5px;flex-direction:column;min-height:72px}.public-home .role-option b{font-size:12px}.public-home .field-grid{grid-template-columns:1fr 1fr}.public-home .intro h1{font-size:29px}}
+
+/* Fallback: reveal driver vehicle section even if role-toggle JS is delayed. */
+.public-home .panel:has(.role-tabs input[name="role"][value="driver"]:checked) #vehicle-fields{display:block!important}
