@@ -94,3 +94,18 @@ Change `ADMIN_PASSWORD` in Netlify Site configuration → Environment variables,
 - Netlify Functions are stateless; persistent booking data lives in Google Sheets, not local files.
 - The matching workflow may start a few minutes later than its scheduled time because GitHub scheduled jobs are not exact real-time timers.
 - Never share customer/driver numbers publicly. WhatsApp is a manual click-to-chat action only.
+
+
+## Updated booking privacy and expiry behaviour
+
+- The public page does not provide a booking directory, search endpoint or other people's contact details. A visitor can only submit a new booking or use their private owner-edit token.
+- The date and time must be future values; the server checks this again even if browser validation is bypassed.
+- Only one active booking is accepted for a mobile number. Apps Script serializes submissions with a script lock to avoid two simultaneous bookings for the same number.
+- Driver submissions require vehicle type; vehicle registration/number is optional.
+- On successful booking, the browser stores a random owner-edit token in local storage. The visitor can select **Edit an existing booking on this device**, enter the reference and confirm their mobile number to update the saved booking. Clearing browser storage or changing device loses that edit token.
+- Admin selects a 6, 12 or 24 hour lifetime. The five-minute GitHub Actions match check calls the expiry routine, which physically deletes expired booking rows from the Bookings tab and keeps an activity event.
+- Admin can permanently delete any booking at any time.
+- The Activity tab/dashboard records booking creation, edits, automatic deletion and WhatsApp link opens. A link-open event is not confirmation that the person pressed Send or that a message was delivered.
+- The post-booking WhatsApp text begins **“Yahan booking hai”** and includes booking type, name, mobile, route, date/time and driver vehicle information when present. The user must press Send in WhatsApp.
+
+Before production, replace the Apps Script code from this repository, run `setup` once to migrate existing sheet headers, and deploy a **new Apps Script web app version**. Update the Netlify environment variable `GOOGLE_SHEET_URL` if the deployment URL changes. Add the five additional Netlify secrets documented above and the GitHub Actions secrets `APP_BASE_URL` and `CRON_SECRET`.
