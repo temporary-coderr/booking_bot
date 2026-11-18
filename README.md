@@ -1,47 +1,96 @@
 # Booking Bot
 
-WhatsApp-inspired, mobile-first driver/customer booking and private admin platform.
+Mobile-first driver/customer booking platform using Netlify, Google Sheets, Telegram and WhatsApp click-to-chat.
 
-## Stack
-- Python + Flask backend
-- SQLite database (mount a persistent disk at `./instance` in production)
-- Vanilla HTML/CSS/JavaScript frontend
-- Telegram notifications to the configured admin chat
-- WhatsApp official click-to-chat links (the user must press Send)
+## Architecture
 
-## Required environment variables
-- `SECRET_KEY`: long random session signing secret.
-- `ADMIN_PASSWORD`: initial/current admin password; never commit it.
-- `ADMIN_URL_TOKEN`: long random secret segment used in the private admin URL. Keep a copy; your private dashboard URL is `APP_BASE_URL/control/ADMIN_URL_TOKEN`.
-- `DATABASE_PATH`: optional SQLite path; defaults to `instance/bookings.sqlite3`.
-- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`: optional Telegram notification settings.
-- `CRON_SECRET`: optional secret for the scheduled matching endpoint.
-- `APP_BASE_URL`: public base URL, used to display the private admin URL after deployment.
+- **Netlify** hosts the public website and serverless API.
+- **Google Sheets** stores bookings, WhatsApp receivers and match-notification history.
+- **Telegram** sends private admin-only match alerts.
+- **WhatsApp** uses official click-to-chat links. The person must review and press Send; the app never sends WhatsApp messages automatically.
+- **GitHub Actions** runs the matching check every five minutes.
 
-Set these as deployment environment variables and GitHub Actions secrets where applicable. Do not put secrets in source files. For Render, set `ADMIN_PASSWORD`, `ADMIN_URL_TOKEN`, `APP_BASE_URL`, Telegram values, and the generated secrets in the service environment. Add GitHub Actions secrets `ADMIN_PASSWORD`, `RENDER_API_KEY`, and `RENDER_SERVICE_ID` to enable the **Reset admin password** workflow. When you change the GitHub `ADMIN_PASSWORD` secret, run Actions → Reset admin password → Run workflow; it updates the Render service variable and triggers a deploy. The workflow updates only the `ADMIN_PASSWORD` variable, not the other service variables.
+The public page is `public/index.html`. Netlify publishes the `public/` directory. The old Flask/SQLite/Render deployment is no longer the active architecture.
 
-## Run locally
-```bash
-python -m venv .venv
-# Windows: .venv\\Scripts\\activate
-# macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-set FLASK_APP=app.py
-python app.py
-```
-Open `http://127.0.0.1:5000`. The private admin URL is `/control/<ADMIN_URL_TOKEN>`.
+## Netlify environment variables
 
-## Deployment
-Use a Python web service (for example Render) with a persistent disk mounted at the project root or set `DATABASE_PATH` to a path on the persistent disk. Free ephemeral filesystems can lose SQLite data on restart and free instances may sleep; they are not suitable for dependable live bookings. Configure the environment variables above before exposing the service.
+Keep all values in Netlify Site configuration → Environment variables. Never commit secrets or paste them into public code.
 
-## Security and behavior
-- Admin route is not linked from public pages; both the private URL token and password are required.
-- Password verification uses PBKDF2-HMAC-SHA256 and a random salt persisted in the database.
-- Change `ADMIN_PASSWORD` in the deployment environment and restart/redeploy to reset it. The app re-hashes the new value using the stored salt.
-- Public booking pages never show contact numbers from other bookings or matching records.
-- WhatsApp links only open a prefilled chat. The admin/user must manually press Send.
-- Matching notifications go only to the configured Telegram admin chat. Phone numbers are excluded from notification text.
+Already configured by you:
+- `GOOGLE_SHEET_URL` — must be the **Apps Script Web App deployment URL** connected to your spreadsheet, not the normal spreadsheet browser URL.
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
 
-## GitHub Actions
-The scheduled workflow calls the protected matching endpoint every five minutes. Add `APP_BASE_URL` and `CRON_SECRET` as repository Actions secrets before enabling it.
-\n\n## GitHub repository secrets\n\nFor scheduled matching add `APP_BASE_URL` and `CRON_SECRET` as Actions secrets. For password recovery add `ADMIN_PASSWORD`, `RENDER_API_KEY`, and `RENDER_SERVICE_ID`. `ADMIN_URL_TOKEN` is also set as a Render service environment variable; keep its value privately so you can construct the hidden admin URL. Create a long random token (at least 32 characters) for it.\n\nLocal development: set `COOKIE_SECURE=false` when using plain `http://127.0.0.1`.\n
+Add these server-only variables:
+- `SHEETS_API_SECRET` — a long random secret; it must exactly match the Apps Script Script Property with the same name.
+- `ADMIN_PASSWORD` — your private dashboard password.
+- `ADMIN_URL_TOKEN` — long random secret path token (at least 32 random characters).
+- `SESSION_SECRET` — long random session-signing secret (at least 32 random characters).
+- `CRON_SECRET` — long random secret used by the scheduled matching workflow.
+
+Do not use the same value for all secrets. Do not put any of them in the `public/` folder.
+
+## Connect Google Sheets
+
+1. Open the target Google spreadsheet.
+2. Open Extensions → Apps Script.
+3. Replace the editor content with `google-apps-script/Code.gs` from this repository.
+4. In Apps Script Project Settings → Script Properties, add:
+   - `SPREADSHEET_ID`: the ID between `/d/` and `/edit` in the spreadsheet URL.
+   - `SHEETS_API_SECRET`: exactly the same random value configured in Netlify.
+5. In the Apps Script editor, select and run `setup` once. Approve the requested spreadsheet permissions. It creates the `Bookings`, `Receivers`, and `Notifications` tabs and their headers.
+6. Deploy → New deployment → Web app. Execute as **Me**. Set access to **Anyone** so Netlify Functions can call the endpoint; the shared secret protects the data operations.
+7. Copy the Web App URL ending in `/exec` into Netlify's `GOOGLE_SHEET_URL` environment variable.
+8. After changing environment variables, trigger a new Netlify deploy.
+
+Do not share the Apps Script URL together with the API secret. The normal spreadsheet link is not the API endpoint.
+
+## Netlify deployment
+
+1. Import `temporary-coderr/booking_bot` into Netlify.
+2. Build settings:
+   - Base directory: blank
+   - Build command: blank
+   - Publish directory: `public`
+   - Functions directory: `netlify/functions`
+3. Add all eight environment variables listed above (the three existing ones plus five additional ones).
+4. Deploy the site.
+5. Open the public site and submit a test booking. Confirm a row appears in the Google Sheets `Bookings` tab.
+
+The hidden admin URL is:
+
+`https://YOUR-NETLIFY-SITE.netlify.app/control/YOUR_ADMIN_URL_TOKEN`
+
+Keep the token private. The admin page is not linked from the public booking page. Both the secret path and password are required.
+
+## Admin dashboard powers
+
+- View, search and filter all driver/customer bookings.
+- See private phone numbers and open a WhatsApp chat manually.
+- Edit name, phone, route, via, date and time.
+- Change status: pending, approved, rejected or completed.
+- Activate/deactivate or permanently delete bookings.
+- Review route/date/time matches and manually contact either party.
+- Add/remove WhatsApp receivers shown after successful public bookings.
+- View total bookings, active bookings, possible matches and notification count.
+- Log out; the signed admin session expires after eight hours.
+
+Customer/driver phone numbers are not included in automated Telegram match alerts. The admin decides manually whether to contact or connect people.
+
+## Scheduled matching
+
+The repository's GitHub Actions workflow calls Netlify every five minutes. Add these GitHub repository Actions secrets:
+- `APP_BASE_URL`: your deployed Netlify site URL, e.g. `https://your-site.netlify.app`.
+- `CRON_SECRET`: the same value as the Netlify environment variable.
+
+You can also run the workflow manually from GitHub → Actions → Booking match checker.
+
+## Password recovery
+
+Change `ADMIN_PASSWORD` in Netlify Site configuration → Environment variables, then trigger a new deploy. The password is checked server-side; it is never embedded in the website source. Keep your `ADMIN_URL_TOKEN` safe as well.
+
+## Important notes
+
+- Netlify Functions are stateless; persistent booking data lives in Google Sheets, not local files.
+- The matching workflow may start a few minutes later than its scheduled time because GitHub scheduled jobs are not exact real-time timers.
+- Never share customer/driver numbers publicly. WhatsApp is a manual click-to-chat action only.
