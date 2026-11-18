@@ -1,4 +1,5 @@
 import hashlib
+from contextlib import contextmanager
 import hmac
 import json
 import os
@@ -18,7 +19,7 @@ DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
 app.config.update(
-    SECRET_KEY=os.getenv("SECRET_KEY", ""),
+    SECRET_KEY=os.getenv("SECRET_KEY") or secrets.token_urlsafe(48),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.getenv("COOKIE_SECURE", "true").lower() == "true",
@@ -35,11 +36,19 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 
+@contextmanager
 def db():
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def init_db():
@@ -290,7 +299,7 @@ def admin_login(token):
         return redirect(url_for("admin_dashboard", token=token))
     if request.method == "POST":
         validate_csrf()
-        if not ADMIN_PASSWORD or not app.config["SECRET_KEY"]:
+        if not ADMIN_PASSWORD or not os.getenv("SECRET_KEY"):
             flash("Admin login is not configured. Set ADMIN_PASSWORD and SECRET_KEY.", "error")
         else:
             with db() as conn:
@@ -380,8 +389,8 @@ def bad_request(error):
 
 init_db()
 
-if not app.config["SECRET_KEY"]:
-    app.logger.warning("SECRET_KEY is missing. Admin login is disabled until configured.")
+if not os.getenv("SECRET_KEY"):
+    app.logger.warning("SECRET_KEY is missing. A temporary key is being used; configure SECRET_KEY before production admin login.")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False)
