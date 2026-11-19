@@ -44,6 +44,20 @@
   document.getElementById("activity-list").textContent=(data.activity||[]).map(a=>a.event+" · "+a.reference+" · "+a.created_at).join("\n")||"No visitor activity recorded.";
   document.getElementById("receiver-list").innerHTML=data.receivers.map(r=>`<div class="receiver-row"><span><b>${esc(r.label)}</b><small>+${esc(r.phone)}</small></span><button class="danger-button" data-receiver-delete="${esc(r.id)}">Remove</button></div>`).join("")||'<p class="empty-state">No WhatsApp receivers configured.</p>';
  }
+ const telegramStatus=t=>{document.getElementById("telegram-status").textContent=t};
+ document.getElementById("telegram-test").addEventListener("click",async e=>{
+  const b=e.currentTarget;b.disabled=true;telegramStatus("Sending test message…");
+  try{const r=await api("telegram-test",{});telegramStatus(r.message||"Telegram test sent.");}
+  catch(x){telegramStatus(x.message);}
+  finally{b.disabled=false}
+ });
+ document.getElementById("run-match-check").addEventListener("click",async e=>{
+  const b=e.currentTarget;if(!confirm("Run a manual match check and send Telegram alerts for any new matches?"))return;
+  b.disabled=true;telegramStatus("Checking active bookings…");
+  try{const r=await api("admin-match-check",{});telegramStatus("Check complete. Possible matches: "+r.total_possible_matches+". New alerts sent: "+r.matched_pairs_notified+". Already notified: "+r.already_notified+". Failed: "+r.failed+". Expired: "+r.expired+".");await refresh();}
+  catch(x){telegramStatus(x.message);}
+  finally{b.disabled=false}
+ });
  document.getElementById("login-form").addEventListener("submit",async e=>{e.preventDefault();const err=document.getElementById("login-error");err.textContent="";try{const j=await api("login",{token,password:document.getElementById("admin-password").value});csrf=j.csrf;login.hidden=true;dash.hidden=false;await refresh()}catch(x){err.textContent=x.message}});
  document.getElementById("logout").addEventListener("click",async()=>{try{await api("logout",{})}finally{csrf="";dash.hidden=true;login.hidden=false}});
  document.getElementById("refresh").addEventListener("click",()=>refresh().catch(e=>status(e.message)));
