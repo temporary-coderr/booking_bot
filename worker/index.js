@@ -137,24 +137,49 @@ async function adminApi(request, env, path, session) {
     let number=1; while(labels.has("Contact Admin "+number)) number++; const id=crypto.randomUUID(), label="Contact Admin "+number; await db.prepare("INSERT INTO help_contacts(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); return json({ ok:true,contact:{id,label,phone} });
   }
   if (method === "POST" && path === "/api/help-contact-delete") { await db.prepare("DELETE FROM help_contacts WHERE id=?").bind(d.id).run(); return json({ok:true}); }
-  if (method === "GET" && path === "/api/report.xls") {
+  if (method === "GET" && path === "/api/report.xlsx") {
     const rows = await db.prepare("SELECT b.*, da.available_locations FROM bookings b LEFT JOIN driver_availability da ON da.booking_id = b.id").all();
     const keys = ["id","reference","role","name","phone","origin","destination","via","trip_date","trip_time","created_at","active","status","vehicle_type","capacity_kg","passenger_count","available_locations"];
     const labels = ["Booking ID","Reference","Role","Name","Mobile Number","Origin","Destination","Via","Travel Date","Travel Time","Submitted At","Active","Status","Vehicle","Capacity (kg)","Passengers","Additional Availability"];
-    const xml = value => String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
-    const sheet = (name, role) => {
+    const escXml = value => String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
+    const colName = n => { let s=""; for(n++;n;n=Math.floor((n-1)/26)) s=String.fromCharCode(65+(n-1)%26)+s; return s; };
+    const makeSheet = (role) => {
       const list = (rows.results || []).filter(r => r.role === role).sort((a,b) => {
-        const phoneA = String(a.phone || "").replace(/\D/g,""), phoneB = String(b.phone || "").replace(/\D/g,"");
-        return phoneA.localeCompare(phoneB, undefined, {numeric:true}) || String(a.trip_date || "").localeCompare(String(b.trip_date || "")) || String(a.trip_time || "").localeCompare(String(b.trip_time || ""));
+        const pa=String(a.phone||"").replace(/\\D/g,""), pb=String(b.phone||"").replace(/\\D/g,"");
+        return pa.localeCompare(pb,undefined,{numeric:true}) || String(a.trip_date||"").localeCompare(String(b.trip_date||"")) || String(a.trip_time||"").localeCompare(String(b.trip_time||""));
       });
-      const rowXml = (values) => "<Row>" + values.map(v => '<Cell><Data ss:Type="String">' + xml(v) + '</Data></Cell>').join("") + "</Row>";
-      return '<Worksheet ss:Name="' + name + '"><Table>' + rowXml(labels) + list.map(r => rowXml(keys.map(k => r[k]))).join("") + '</Table></Worksheet>';
+      const all = [labels, ...list.map(r => keys.map(k => r[k]))];
+      const rowXml = all.map((values,ri) => '<row r="'+(ri+1)+'">'+values.map((v,ci) => '<c r="'+colName(ci)+(ri+1)+'" t="inlineStr"><is><t xml:space="preserve">'+escXml(v)+'</t></is></c>').join("")+'</row>').join("");
+      const widths = [38,14,12,22,20,18,18,30,14,12,25,10,14,14,14,12,32].map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join("");
+      return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="18"/><cols>'+widths+'</cols><sheetData>'+rowXml+'</sheetData><autoFilter ref="A1:Q'+all.length+'"/></worksheet>';
     };
-    const workbook = '<?xml version="1.0" encoding="UTF-8"?>' +
-      '<?mso-application progid="Excel.Sheet"?>' +
-      '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' +
-      sheet("Drivers","driver") + sheet("Customers","customer") + '</Workbook>';
-    return new Response(workbook,{headers:{"content-type":"application/vnd.ms-excel; charset=utf-8","content-disposition":'attachment; filename="routeadda-bookings.xls"',"cache-control":"no-store"}});
+    const files = [
+      ["[Content_Types].xml",'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'],
+      ["_rels/.rels",'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+      ["xl/workbook.xml",'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Drivers" sheetId="1" r:id="rId1"/><sheet name="Customers" sheetId="2" r:id="rId2"/></sheets></workbook>'],
+      ["xl/_rels/workbook.xml.rels",'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>'],
+      ["xl/worksheets/sheet1.xml",makeSheet("driver")],
+      ["xl/worksheets/sheet2.xml",makeSheet("customer")]
+    ];
+    const encoder = new TextEncoder();
+    const crc32 = bytes => { let c=0xffffffff; for(const b of bytes){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0);} return (c^0xffffffff)>>>0; };
+    const chunks=[], central=[]; let offset=0;
+    const put16=(v,n)=>v.setUint16(n,0,true), put32=(v,n,x)=>v.setUint32(n,x>>>0,true);
+    for(const [name,content] of files){
+      const nb=encoder.encode(name), data=encoder.encode(content), crc=crc32(data);
+      const local=new Uint8Array(30+nb.length), lv=new DataView(local.buffer);
+      put32(lv,0,0x04034b50); put16(lv,4,20); put16(lv,6,0x0800); put16(lv,8,0); put32(lv,14,crc); put32(lv,18,data.length); put32(lv,22,data.length); put16(lv,26,nb.length); local.set(nb,30);
+      chunks.push(local,data);
+      const dir=new Uint8Array(46+nb.length), dv=new DataView(dir.buffer);
+      put32(dv,0,0x02014b50); put16(dv,4,20); put16(dv,6,20); put16(dv,8,0x0800); put16(dv,10,0); put32(dv,16,crc); put32(dv,20,data.length); put32(dv,24,data.length); put16(dv,28,nb.length); put32(dv,42,offset); dir.set(nb,46);
+      central.push(dir); offset+=local.length+data.length;
+    }
+    const centralSize=central.reduce((n,b)=>n+b.length,0), end=new Uint8Array(22), ev=new DataView(end.buffer);
+    put32(ev,0,0x06054b50); put16(ev,8,files.length); put16(ev,10,files.length); put32(ev,12,centralSize); put32(ev,16,offset);
+    const output=new Uint8Array(offset+centralSize+end.length); let pos=0;
+    for(const part of [...chunks,...central,end]){output.set(part,pos);pos+=part.length;}
+    return new Response(output,{headers:{"content-type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","content-disposition":'attachment; filename="routeadda-bookings.xlsx"',"cache-control":"no-store"}});
   }
   if (method === "GET" && path === "/api/report.csv") {
     const rows = await db.prepare("SELECT b.*, da.available_locations FROM bookings b LEFT JOIN driver_availability da ON da.booking_id=b.id ORDER BY b.trip_date,b.trip_time").all();
