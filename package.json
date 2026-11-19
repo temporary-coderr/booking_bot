@@ -1,0 +1,13 @@
+{
+  "name": "routeadda-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "db:migrate:local": "wrangler d1 migrations apply routeadda-db --local",
+    "check": "node --check worker/index.js && node --check public/app.js && node --check public/admin.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
