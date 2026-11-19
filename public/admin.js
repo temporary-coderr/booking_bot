@@ -54,7 +54,7 @@
  document.getElementById("run-match-check").addEventListener("click",async e=>{
   const b=e.currentTarget;if(!confirm("Run a manual match check and send Telegram alerts for any new matches?"))return;
   b.disabled=true;telegramStatus("Checking active bookings…");
-  try{const r=await api("admin-match-check",{});telegramStatus("Check complete. Possible matches: "+r.total_possible_matches+". New alerts sent: "+r.matched_pairs_notified+". Already notified: "+r.already_notified+". Failed: "+r.failed+". Expired: "+r.expired+".");await refresh();}
+  try{const r=await api("admin-match-check",{});await refresh();telegramStatus("Check complete. Possible matches: "+r.total_possible_matches+". New alerts sent: "+r.matched_pairs_notified+". Already notified: "+r.already_notified+". Failed: "+r.failed+". Expired: "+r.expired+".");}
   catch(x){telegramStatus(x.message);}
   finally{b.disabled=false}
  });
