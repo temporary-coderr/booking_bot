@@ -86,3 +86,29 @@ body.public-home{background:#06150f;color:#f5faf6;font-family:'DM Sans','Noto Sa
 @media(max-width:480px){.header-actions{gap:6px}.install-button{padding:8px 10px;font-size:11px}}
 
 .availability-option input{width:auto!important;display:inline-block!important;margin:0 8px 0 0;vertical-align:middle}.availability-option{display:flex;align-items:center;gap:8px;background:#f4f7fc;border:1px solid var(--line);border-radius:12px;padding:12px;margin:8px 0 14px}.availability-option input{flex:0 0 auto}
+
+/* Manual matching workspace: drivers and customers share the page equally. */
+.manual-workspace{padding:22px}
+.manual-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+.manual-column{min-width:0;border:1px solid var(--line);border-radius:16px;padding:14px;background:#fbfcff}
+.drivers-column{border-top:4px solid #e4a12b}
+.customers-column{border-top:4px solid #2875cf}
+.manual-column-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
+.manual-column-heading h3{font-size:17px;margin:0}
+.manual-count{font-size:10px;font-weight:800;color:var(--muted);background:#eef2f7;border-radius:20px;padding:5px 9px;white-space:nowrap}
+.manual-column .search-box{margin:0 0 12px;background:#fff}
+.group-list{display:grid;gap:10px;max-height:720px;overflow:auto;padding-right:3px}
+.phone-group{background:#fff;border:1px solid #e1e7ef;border-radius:12px;padding:11px;min-width:0}
+.phone-group-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-bottom:8px;border-bottom:1px solid #edf0f4}
+.phone-group-heading strong,.phone-group-heading small{display:block;overflow-wrap:anywhere}
+.phone-group-heading strong{font-size:12px;color:var(--ink)}
+.phone-group-heading small{font-size:10px;color:var(--muted);margin-top:3px}
+.phone-group-bookings{display:grid;gap:8px;padding-top:8px}
+.group-booking{display:grid;gap:4px;padding:9px;border-radius:9px;background:#f6f8fb;min-width:0}
+.group-booking-top{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.group-booking-top>b{font-size:10px;color:#53647b}
+.group-booking .status-chip{font-size:8px}
+.group-booking>strong{font-size:11px}
+.group-route{font-size:11px;font-weight:700;overflow-wrap:anywhere}
+.group-booking>small{font-size:9px;color:var(--muted);overflow-wrap:anywhere}
+@media(max-width:720px){.manual-columns{grid-template-columns:1fr}.group-list{max-height:520px}.manual-workspace{padding:15px}}
