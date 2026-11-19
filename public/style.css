@@ -114,20 +114,33 @@ body.public-home{background:#06150f;color:#f5faf6;font-family:'DM Sans','Noto Sa
 @media(max-width:720px){.manual-columns{grid-template-columns:1fr}.group-list{max-height:520px}.manual-workspace{padding:15px}}
 
 
-/* Driver option contrast fix: use a clear amber accent instead of pale/white text. */
-.public-home .role-option:has(input[name="role"][value="driver"]) {
-  color: #f6bd55;
+/* Dark-theme styling for the additional-availability checkbox. */
+.public-home .availability-option {
+  background: #102f20;
+  border: 1px solid #286b48;
+  color: #e8fff0;
+  border-radius: 12px;
+  padding: 13px 14px;
+  line-height: 1.45;
 }
-.public-home .role-option:has(input[name="role"][value="driver"]:checked) {
-  background: #f5a623;
-  color: #241500;
-  box-shadow: 0 0 0 1px #f5a623;
+.public-home .availability-option span {
+  color: #e8fff0;
+  line-height: 1.45;
 }
-.public-home .role-option:has(input[name="role"][value="driver"]:checked) b,
-.public-home .role-option:has(input[name="role"][value="driver"]:checked) .role-icon {
-  color: #241500;
+.public-home .availability-option input[type="checkbox"] {
+  appearance: auto;
+  accent-color: #20d978;
+  width: 18px !important;
+  height: 18px;
+  margin: 0 2px 0 0;
+  flex: 0 0 18px;
+  cursor: pointer;
 }
-.public-home .role-option:has(input[name="role"][value="driver"]:focus-visible) {
-  outline: 3px solid #ffd27a;
-  outline-offset: 3px;
+.public-home .availability-option:has(input:checked) {
+  background: #17442c;
+  border-color: #20d978;
+}
+.public-home .availability-option:focus-within {
+  outline: 2px solid #20d978;
+  outline-offset: 2px;
 }
