@@ -116,3 +116,32 @@ Before production, replace the Apps Script code from this repository, run `setup
 - Every driver booking records load capacity in kilograms; CAR bookings also record passenger count.
 - A route can include up to five intermediate cities (Via 1–Via 5).
 - Vehicle registration numbers are not collected.
+
+## Cloudflare migration branch — local test only
+
+This branch adds a Cloudflare Worker API and a local D1 schema. It does not replace the Netlify backend on `main`, and it is not deployed to Cloudflare.
+
+### Requirements
+- Node.js 20 or newer
+- npm
+- Windows PowerShell, macOS Terminal, or Linux shell
+
+### First local run
+1. Copy `.dev.vars.example` to `.dev.vars` and change the local-only password, URL token, session secret, and cron secret. Never commit `.dev.vars`.
+2. Install dependencies: `npm install`.
+3. Create the local D1 tables: `npm run db:migrate:local`.
+4. Start the local Worker: `npm run dev`.
+5. Open `http://localhost:8787`. The public site uses local D1; it does not connect to the live Google Sheet.
+6. Open `http://localhost:8787/control/local-admin-access-token` and sign in using the local password from `.dev.vars`.
+
+### Local data
+The local D1 database is stored under `.wrangler/` and is ignored by Git. It is separate from any production Cloudflare database. Test bookings created here are local test records only.
+
+### Current migration scope
+- Worker routes for booking creation, admin login/session, admin booking actions, matching checks, Telegram alerts, WhatsApp receiver contacts, help contacts, CSV export, and driver availability.
+- D1 tables for bookings, driver availability, receivers, help contacts, notifications, activity, and settings.
+- Public booking edits are disabled; edit requests are directed to configured WhatsApp help contacts.
+- Driver and customer booking caps are separate: up to five active future requests per mobile number for each role.
+- Expired bookings are marked expired and retained in the database rather than deleted.
+
+Do not run `wrangler deploy` yet. First complete local button, admin permission, booking-limit, expiry, matching, and data-retention checks. Production D1 creation, data import, and cutover are a later step after approval.
