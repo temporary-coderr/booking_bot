@@ -205,7 +205,7 @@ async function adminApi(request, env, path, session) {
       const pair = [m.a.reference, m.b.reference].sort().join(":");
       const known = await db.prepare("SELECT pair FROM notifications WHERE pair=?").bind(pair).first();
       if (known) { skipped++; continue; }
-      const sent = await sendTelegram("POSSIBLE DRIVER / CUSTOMER MATCH\\n\\n" + summary(m.a) + "\\n\\n" + summary(m.b) + "\\n\\nMatch: " + m.reason + "\\nAdmin: review manually. No customer phone numbers included.", env);
+      const sent = await sendTelegram("POSSIBLE DRIVER / CUSTOMER MATCH\n\n" + summary(m.a) + "\n\n" + summary(m.b) + "\n\nMatch: " + m.reason + "\nAdmin: review manually. No customer phone numbers included.", env);
       if (sent) {
         await db.prepare("INSERT OR IGNORE INTO notifications(pair,created_at) VALUES(?,?)").bind(pair, new Date().toISOString()).run();
         notified++;
