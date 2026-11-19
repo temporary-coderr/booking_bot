@@ -214,16 +214,36 @@ async function adminApi(request, env, path, session) {
     await activity(db, "", "admin_match_check");
     return json({ ok: true, expired, total_possible_matches: matches.length, matched_pairs_notified: notified, already_notified: skipped, failed });
   }
+  if (method === "GET" && path === "/api/activity-history") {
+    const url = new URL(request.url);
+    const periods = { "1h": 3600000, "6h": 6 * 3600000, "12h": 12 * 3600000, "1d": 86400000, "7d": 7 * 86400000 };
+    const period = periods[url.searchParams.get("period")] ? url.searchParams.get("period") : "1d";
+    const type = ["all", "whatsapp", "visitors"].includes(url.searchParams.get("type")) ? url.searchParams.get("type") : "all";
+    const requestedPage = Number.parseInt(url.searchParams.get("page") || "0", 10);
+    const page = Number.isFinite(requestedPage) ? Math.max(0, Math.min(100000, requestedPage)) : 0;
+    const since = new Date(now() - periods[period]).toISOString();
+    const conditions = ["created_at >= ?"];
+    const values = [since];
+    if (type === "whatsapp") conditions.push("event = 'whatsapp_link_opened'");
+    if (type === "visitors") conditions.push("event <> 'whatsapp_link_opened'");
+    const where = conditions.join(" AND ");
+    const [count, rows] = await Promise.all([
+      db.prepare("SELECT COUNT(*) AS total FROM activity WHERE " + where).bind(...values).first(),
+      db.prepare("SELECT id,reference,event,created_at FROM activity WHERE " + where + " ORDER BY created_at DESC,id DESC LIMIT 50 OFFSET ?").bind(...values, page * 50).all()
+    ]);
+    const total = Number(count?.total) || 0;
+    return json({ ok: true, period, type, page, total, page_size: 50, has_more: (page + 1) * 50 < total, activity: rows.results || [] });
+  }
   if (method === "GET" && path === "/api/admin-data") {
     await expireBookings(db);
-    const [bookings, receivers, help, notified, activityRows, settings, availability] = await Promise.all([
+    const [bookings, receivers, help, notified, settings, availability] = await Promise.all([
       db.prepare("SELECT * FROM bookings ORDER BY created_at DESC").all(), db.prepare("SELECT * FROM receivers ORDER BY created_at").all(),
       db.prepare("SELECT * FROM help_contacts ORDER BY created_at").all(), db.prepare("SELECT COUNT(*) AS n FROM notifications").first(),
-      db.prepare("SELECT * FROM activity ORDER BY created_at DESC LIMIT 300").all(), db.prepare("SELECT value FROM settings WHERE key='expiry_hours'").first(),
+      db.prepare("SELECT value FROM settings WHERE key='expiry_hours'").first(),
       db.prepare("SELECT da.*,b.reference,b.name,b.phone,b.origin,b.destination,b.trip_date,b.trip_time FROM driver_availability da JOIN bookings b ON b.id=da.booking_id ORDER BY da.created_at DESC").all()
     ]);
     const rows = bookings.results || [];
-    return json({ ok: true, csrf: session.csrf, bookings: rows, receivers: receivers.results || [], help_contacts: help.results || [], notified: notified?.n || 0, activity: activityRows.results || [], matches: findMatches(rows), expiry_hours: Number(settings?.value) || 12, driver_availability: availability.results || [] });
+    return json({ ok: true, csrf: session.csrf, bookings: rows, receivers: receivers.results || [], help_contacts: help.results || [], notified: notified?.n || 0, matches: findMatches(rows), expiry_hours: Number(settings?.value) || 12, driver_availability: availability.results || [] });
   }
   if (method === "POST" && path === "/api/booking-update") {
     const fields = ["name","phone","origin","destination","via","trip_date","trip_time","role","vehicle_type","capacity_kg","passenger_count"];
