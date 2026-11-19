@@ -137,6 +137,25 @@ async function adminApi(request, env, path, session) {
     let number=1; while(labels.has("Contact Admin "+number)) number++; const id=crypto.randomUUID(), label="Contact Admin "+number; await db.prepare("INSERT INTO help_contacts(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); return json({ ok:true,contact:{id,label,phone} });
   }
   if (method === "POST" && path === "/api/help-contact-delete") { await db.prepare("DELETE FROM help_contacts WHERE id=?").bind(d.id).run(); return json({ok:true}); }
+  if (method === "GET" && path === "/api/report.xls") {
+    const rows = await db.prepare("SELECT b.*, da.available_locations FROM bookings b LEFT JOIN driver_availability da ON da.booking_id = b.id").all();
+    const keys = ["id","reference","role","name","phone","origin","destination","via","trip_date","trip_time","created_at","active","status","vehicle_type","capacity_kg","passenger_count","available_locations"];
+    const labels = ["Booking ID","Reference","Role","Name","Mobile Number","Origin","Destination","Via","Travel Date","Travel Time","Submitted At","Active","Status","Vehicle","Capacity (kg)","Passengers","Additional Availability"];
+    const xml = value => String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
+    const sheet = (name, role) => {
+      const list = (rows.results || []).filter(r => r.role === role).sort((a,b) => {
+        const phoneA = String(a.phone || "").replace(/\D/g,""), phoneB = String(b.phone || "").replace(/\D/g,"");
+        return phoneA.localeCompare(phoneB, undefined, {numeric:true}) || String(a.trip_date || "").localeCompare(String(b.trip_date || "")) || String(a.trip_time || "").localeCompare(String(b.trip_time || ""));
+      });
+      const rowXml = (values) => "<Row>" + values.map(v => '<Cell><Data ss:Type="String">' + xml(v) + '</Data></Cell>').join("") + "</Row>";
+      return '<Worksheet ss:Name="' + name + '"><Table>' + rowXml(labels) + list.map(r => rowXml(keys.map(k => r[k]))).join("") + '</Table></Worksheet>';
+    };
+    const workbook = '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<?mso-application progid="Excel.Sheet"?>' +
+      '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' +
+      sheet("Drivers","driver") + sheet("Customers","customer") + '</Workbook>';
+    return new Response(workbook,{headers:{"content-type":"application/vnd.ms-excel; charset=utf-8","content-disposition":'attachment; filename="routeadda-bookings.xls"',"cache-control":"no-store"}});
+  }
   if (method === "GET" && path === "/api/report.csv") {
     const rows = await db.prepare("SELECT b.*, da.available_locations FROM bookings b LEFT JOIN driver_availability da ON da.booking_id=b.id ORDER BY b.trip_date,b.trip_time").all();
     const keys = ["id","reference","role","name","phone","origin","destination","via","trip_date","trip_time","created_at","active","status","vehicle_type","capacity_kg","passenger_count","available_locations"];
