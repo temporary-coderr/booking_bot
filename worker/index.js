@@ -1,6 +1,7 @@
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const COOKIE = "routeadda_admin";
 const now = () => Date.now();
+const indiaNow = () => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Kolkata', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hourCycle:'h23' }).formatToParts(new Date()).map(x=>[x.type,x.value])); return p.year+'-'+p.month+'-'+p.day+'T'+p.hour+':'+p.minute; };
 const clean = (v, n = 100) => String(v ?? "").replace(/[<>]/g, "").trim().replace(/\s+/g, " ").slice(0, n);
 const digits = v => String(v ?? "").replace(/\D/g, "").slice(0, 15);
 const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { ...JSON_HEADERS, ...headers } });
@@ -69,11 +70,12 @@ async function createBooking(request, env) {
   if (!["driver", "customer"].includes(role) || !b.name || b.phone.length < 10 || !b.origin || !b.destination || b.origin.toLowerCase() === b.destination.toLowerCase()) return json({ ok: false, error: "Please complete all required details and check your mobile number." }, 400);
   if (role === "driver" && (!["TRUCK", "PICKUP", "CAR", "OTHER"].includes(b.vehicle_type) || (["TRUCK", "PICKUP"].includes(b.vehicle_type) && !Number(b.capacity_kg)) || (b.vehicle_type === "CAR" && !Number(b.passenger_count)))) return json({ ok: false, error: "Please complete the vehicle details." }, 400);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(b.trip_date) || !/^\d{2}:\d{2}$/.test(b.trip_time)) return json({ ok: false, error: "Enter a valid travel date and time." }, 400);
-  const trip = new Date(b.trip_date + "T" + b.trip_time + ":00");
-  if (!Number.isFinite(trip.getTime()) || trip.getTime() <= now() || trip.getTime() > now() + 365 * 86400000) return json({ ok: false, error: "Past date or time is not allowed. Choose a future travel time." }, 400);
+  const tripKey = b.trip_date + "T" + b.trip_time, currentIndia = indiaNow();
+  const tripMillis = Date.parse(tripKey + ":00Z"), currentMillis = Date.parse(currentIndia + ":00Z");
+  if (!Number.isFinite(tripMillis) || tripKey <= currentIndia || tripMillis > currentMillis + 365 * 86400000) return json({ ok: false, error: "Past date or time is not allowed. Choose a future travel time." }, 400);
   const db = env.DB; await expireBookings(db);
   const id = crypto.randomUUID(), reference = crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase(), created = new Date().toISOString();
-  const inserted = await db.prepare("INSERT INTO bookings(id,reference,role,name,phone,origin,destination,via,trip_date,trip_time,created_at,active,status,vehicle_type,capacity_kg,passenger_count) SELECT ?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,? WHERE (SELECT COUNT(*) FROM bookings WHERE phone=? AND role=? AND active=1 AND status NOT IN ('completed','cancelled','closed','expired','rejected') AND (trip_date || 'T' || trip_time || ':00') > ?) < 5").bind(id, reference, b.role, b.name, b.phone, b.origin, b.destination, b.via, b.trip_date, b.trip_time, created, b.vehicle_type, b.capacity_kg, b.passenger_count, b.phone, role, new Date().toISOString()).run();
+  const inserted = await db.prepare("INSERT INTO bookings(id,reference,role,name,phone,origin,destination,via,trip_date,trip_time,created_at,active,status,vehicle_type,capacity_kg,passenger_count) SELECT ?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,? WHERE (SELECT COUNT(*) FROM bookings WHERE phone=? AND role=? AND active=1 AND status NOT IN ('completed','cancelled','closed','expired','rejected') AND (trip_date || 'T' || trip_time) > ?) < 5").bind(id, reference, b.role, b.name, b.phone, b.origin, b.destination, b.via, b.trip_date, b.trip_time, created, b.vehicle_type, b.capacity_kg, b.passenger_count, b.phone, role, indiaNow()).run();
   if (!inserted.meta?.changes) return json({ ok: false, error: "This mobile number already has 5 active " + role + " requests. Complete or cancel an existing request before adding another." }, 409);
   if (role === "driver" && d.additional_availability === true) await db.prepare("INSERT INTO driver_availability(booking_id,available_locations,created_at) VALUES(?,?,?)").bind(id, clean(d.available_locations, 500), created).run();
   await activity(db, reference, "booking_created");
