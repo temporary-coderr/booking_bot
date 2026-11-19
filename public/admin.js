@@ -5,7 +5,20 @@
  const api=async(path,body,method)=>{const r=await fetch("/api/"+path,{method:method|| (body?"POST":"GET"),headers:{"Content-Type":"application/json",...(csrf?{"X-CSRF-Token":csrf}:{})},...(body?{body:JSON.stringify(body)}:{})});const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||"Request failed");return j};
  const status=t=>document.getElementById("dashboard-status").textContent=t;
  function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
- async function refresh(){const j=await api("admin-data");data=j;render();document.getElementById("expiry-hours").value=String(j.expiry_hours||12);status("Dashboard updated.")}
+ let activityPage=0;
+ async function loadActivity(){
+  const period=document.getElementById("activity-period").value;
+  const type=document.getElementById("activity-type").value;
+  const query="activity-history?period="+encodeURIComponent(period)+"&type="+encodeURIComponent(type)+"&page="+activityPage;
+  const result=await api(query,null,"GET");
+  const list=document.getElementById("activity-list");
+  list.innerHTML=(result.activity||[]).map(a=>'<div class="activity-row"><strong>'+esc(a.event.replaceAll("_"," "))+' · '+esc(a.reference||"No reference")+'</strong><small>'+esc(new Date(a.created_at).toLocaleString())+'</small></div>').join("")||'<p class="empty-state">No activity found for this period.</p>';
+  document.getElementById("activity-summary").textContent=result.total+" record(s) · "+({ "1h":"Last hour","6h":"Last 6 hours","12h":"Last 12 hours","1d":"Last 1 day","7d":"Last 7 days" }[result.period])+" · "+({all:"All activity",whatsapp:"WhatsApp clicks",visitors:"Visitor / booking activity"}[result.type]);
+  document.getElementById("activity-page-label").textContent="Page "+(activityPage+1)+" of "+Math.max(1,Math.ceil(result.total/50));
+  document.getElementById("activity-prev").disabled=activityPage===0;
+  document.getElementById("activity-next").disabled=!result.has_more;
+ }
+ async function refresh(){const j=await api("admin-data");data=j;render();document.getElementById("expiry-hours").value=String(j.expiry_hours||12);await loadActivity();status("Dashboard updated.")}
  function renderRoleGroups(role,targetId,searchId,countId){
   const query=document.getElementById(searchId).value.trim().toLowerCase();
   const groups=new Map();
@@ -41,7 +54,6 @@
   document.getElementById("driver-availability-list").innerHTML=(data.driver_availability||[]).map(a=>'<article class="booking-row"><b>'+esc(a.name)+' · '+esc(a.phone)+'</b><span>'+esc(a.origin)+' → '+esc(a.destination)+' · '+esc(a.trip_date)+' '+esc(a.trip_time)+'</span><small>Other available locations: '+esc(a.available_locations||"Not specified")+'</small></article>').join("")||'<p class="empty-state">No drivers have marked extra availability.</p>';
   document.getElementById("help-contact-list").innerHTML=(data.help_contacts||[]).map(c=>'<div class="receiver-row"><span><b>'+esc(c.label)+'</b><small>+'+esc(c.phone)+'</small></span><button class="danger-button" data-help-delete="'+esc(c.id)+'">Remove</button></div>').join("")||'<p class="empty-state">No help contacts configured.</p>';
   document.getElementById("match-list").innerHTML=data.matches.map(m=>`<article class="match-card"><div class="match-tag">${esc(m.reason)}</div><div class="match-grid"><div><b>${esc(m.a.role)} · ${esc(m.a.name)}</b><span>${esc(m.a.origin)} → ${esc(m.a.destination)}</span><small>${esc(m.a.trip_date)} · ${esc(m.a.trip_time)} · ${esc(m.a.reference)}</small><strong class="private-phone">${esc(m.a.phone)}</strong></div><div><b>${esc(m.b.role)} · ${esc(m.b.name)}</b><span>${esc(m.b.origin)} → ${esc(m.b.destination)}</span><small>${esc(m.b.trip_date)} · ${esc(m.b.trip_time)} · ${esc(m.b.reference)}</small><strong class="private-phone">${esc(m.b.phone)}</strong></div></div><div class="inline-actions"><a class="outline-button small" target="_blank" rel="noopener" href="https://wa.me/${esc(m.a.phone)}?text=${encodeURIComponent("Hello "+m.a.name+", we may have a suitable ride for your route "+m.a.origin+" to "+m.a.destination+". Please confirm if still needed.")}">Contact first</a><a class="outline-button small" target="_blank" rel="noopener" href="https://wa.me/${esc(m.b.phone)}?text=${encodeURIComponent("Hello "+m.b.name+", we may have a suitable ride for your route "+m.b.origin+" to "+m.b.destination+". Please confirm if still needed.")}">Contact second</a><button class="copy-button" data-copy-match="${esc(m.a.reference)}|${esc(m.b.reference)}">Copy match summary</button></div></article>`).join("")||'<p class="empty-state">No possible matches found yet.</p>';
-  document.getElementById("activity-list").textContent=(data.activity||[]).map(a=>a.event+" · "+a.reference+" · "+a.created_at).join("\n")||"No visitor activity recorded.";
   document.getElementById("receiver-list").innerHTML=data.receivers.map(r=>`<div class="receiver-row"><span><b>${esc(r.label)}</b><small>+${esc(r.phone)}</small></span><button class="danger-button" data-receiver-delete="${esc(r.id)}">Remove</button></div>`).join("")||'<p class="empty-state">No WhatsApp receivers configured.</p>';
  }
  const telegramStatus=t=>{document.getElementById("telegram-status").textContent=t};
@@ -61,6 +73,11 @@
  document.getElementById("login-form").addEventListener("submit",async e=>{e.preventDefault();const err=document.getElementById("login-error");err.textContent="";try{const j=await api("login",{token,password:document.getElementById("admin-password").value});csrf=j.csrf;login.hidden=true;dash.hidden=false;await refresh()}catch(x){err.textContent=x.message}});
  document.getElementById("logout").addEventListener("click",async()=>{try{await api("logout",{})}finally{csrf="";dash.hidden=true;login.hidden=false}});
  document.getElementById("refresh").addEventListener("click",()=>refresh().catch(e=>status(e.message)));
+ document.getElementById("activity-period").addEventListener("change",()=>{activityPage=0;loadActivity().catch(e=>document.getElementById("activity-summary").textContent=e.message)});
+ document.getElementById("activity-type").addEventListener("change",()=>{activityPage=0;loadActivity().catch(e=>document.getElementById("activity-summary").textContent=e.message)});
+ document.getElementById("activity-prev").addEventListener("click",()=>{if(activityPage>0){activityPage--;loadActivity().catch(e=>document.getElementById("activity-summary").textContent=e.message)}});
+ document.getElementById("activity-next").addEventListener("click",()=>{activityPage++;loadActivity().catch(e=>document.getElementById("activity-summary").textContent=e.message)});
+
  ["search","role-filter","status-filter","driver-group-search","customer-group-search"].forEach(id=>document.getElementById(id).addEventListener("input",render));
  document.getElementById("booking-list").addEventListener("click",async e=>{
   const edit=e.target.closest("[data-edit]"),toggle=e.target.closest("[data-status]"),del=e.target.closest("[data-delete]");
@@ -78,5 +95,5 @@
  document.getElementById("receiver-form").addEventListener("submit",async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{await api("receiver-add",{label:f.get("label"),phone:f.get("phone")});e.currentTarget.reset();await refresh()}catch(x){status(x.message)}});
  document.getElementById("receiver-list").addEventListener("click",async e=>{const b=e.target.closest("[data-receiver-delete]");if(b&&confirm("Remove this WhatsApp receiver?")){try{await api("receiver-delete",{id:b.dataset.receiverDelete});await refresh()}catch(x){status(x.message)}}});
  if(!token){login.hidden=false;return}
- api("admin-data").then(j=>{dash.hidden=false;csrf=j.csrf||"";data=j;render();status("Read-only session check. Sign in to manage bookings.")}).catch(()=>{login.hidden=false});
+ api("admin-data").then(async j=>{dash.hidden=false;csrf=j.csrf||"";data=j;render();await loadActivity();status("Read-only session check. Sign in to manage bookings.")}).catch(()=>{login.hidden=false});
 })();
