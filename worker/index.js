@@ -41,22 +41,123 @@ async function expireBookings(db) {
   const result = await db.prepare("UPDATE bookings SET active=0,status='expired' WHERE active=1 AND status NOT IN ('completed','cancelled','closed','expired','rejected') AND created_at < ?").bind(cutoff).run();
   return result.meta?.changes || 0;
 }
-function routePoints(b) { return [b.origin, ...(String(b.via || "").split(",")), b.destination].map(x => clean(x, 100).toLowerCase()).filter(Boolean); }
-function matchReason(a, b) {
-  const pa = routePoints(a), pb = routePoints(b), sa = new Set(pa.slice(0, -1).map((x, i) => x + "→" + pa[i + 1]));
-  if (pb.slice(0, -1).some((x, i) => sa.has(x + "→" + pb[i + 1]))) return "overlapping route";
-  if (pa[0] === pb[0] && pa.at(-1) === pb.at(-1)) return "same route";
-  if (pa.slice(1, -1).some(x => pb.includes(x)) || pb.slice(1, -1).some(x => pa.includes(x))) return "via/connecting route";
-  return "";
+function normalizeLocation(value) {
+  const text = String(value || "")
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const aliases = {
+    "भोपाल": "bhopal",
+    "bhopal city": "bhopal",
+    "इंदौर": "indore",
+    "इन्दौर": "indore",
+    "indore city": "indore",
+    "उज्जैन": "ujjain",
+    "ujjain city": "ujjain",
+    "रतलाम": "ratlam",
+    "ratlam city": "ratlam",
+    "जावरा": "jaora",
+    "जावरा शहर": "jaora",
+    "jaora city": "jaora",
+    "राघोगढ़": "raghogarh",
+    "राघौगढ़": "raghogarh",
+    "raghogarh city": "raghogarh",
+    "राजगढ़": "rajgarh",
+    "rajgarh city": "rajgarh",
+    "पचोर": "pachore",
+    "pachore city": "pachore"
+  };
+
+  return aliases[text] || text;
 }
-function findMatches(bookings) {
-  const list = bookings.filter(active), out = [];
-  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
-    const a = list[i], b = list[j]; if (a.role === b.role || a.trip_date !== b.trip_date) continue;
-    const mins = Math.abs(new Date(a.trip_date + "T" + a.trip_time) - new Date(b.trip_date + "T" + b.trip_time)) / 60000;
-    if (mins > 180) continue; const reason = matchReason(a, b); if (reason) out.push({ a, b, reason });
+
+function bookingTime(b) {
+  const date = String(b.trip_date || "");
+  const time = String(b.trip_time || "");
+
+  const dm = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const tm = time.match(/^(\d{2}):(\d{2})$/);
+
+  if (!dm || !tm) return null;
+
+  const year = Number(dm[1]);
+  const month = Number(dm[2]);
+  const day = Number(dm[3]);
+  const hour = Number(tm[1]);
+  const minute = Number(tm[2]);
+
+  if (
+    month < 1 || month > 12 ||
+    hour > 23 || minute > 59
+  ) return null;
+
+  const timestamp = Date.UTC(
+    year,
+    month - 1,
+    day,
+    hour,
+    minute
+  );
+
+  const check = new Date(timestamp);
+
+  if (
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() !== month - 1 ||
+    check.getUTCDate() !== day
+  ) return null;
+
+  return timestamp;
+}
+
+function matchReason(a, b) {
+  const originA = normalizeLocation(a.origin);
+  const originB = normalizeLocation(b.origin);
+
+  if (!originA || !originB || originA !== originB) {
+    return "";
   }
-  return out;
+
+  return "Same origin — within 24 hours";
+}
+
+function findMatches(bookings) {
+  const list = bookings.filter(active);
+  const matches = [];
+
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const a = list[i];
+      const b = list[j];
+
+      if (
+        !["driver", "customer"].includes(a.role) ||
+        !["driver", "customer"].includes(b.role) ||
+        a.role === b.role
+      ) continue;
+
+      const timeA = bookingTime(a);
+      const timeB = bookingTime(b);
+
+      if (timeA === null || timeB === null) continue;
+
+      const differenceHours =
+        Math.abs(timeA - timeB) / 3600000;
+
+      if (differenceHours > 24) continue;
+
+      const reason = matchReason(a, b);
+
+      if (reason) {
+        matches.push({ a, b, reason });
+      }
+    }
+  }
+
+  return matches;
 }
 const summary = b => String(b.role).toUpperCase() + ": " + b.name + "\nRoute: " + b.origin + " → " + b.destination + (b.via ? " via " + b.via : "") + "\nTravel: " + b.trip_date + " at " + b.trip_time + (b.vehicle_type ? "\nVehicle: " + b.vehicle_type : "") + (b.capacity_kg ? " · Capacity: " + b.capacity_kg + " kg" : "") + (b.passenger_count ? " · Passengers: " + b.passenger_count : "") + "\nReference: " + b.reference;
 async function sendTelegram(text, env) {
