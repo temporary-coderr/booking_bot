@@ -1,0 +1,184 @@
+const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
+const COOKIE = "routeadda_admin";
+const now = () => Date.now();
+const clean = (v, n = 100) => String(v ?? "").replace(/[<>]/g, "").trim().replace(/\s+/g, " ").slice(0, n);
+const digits = v => String(v ?? "").replace(/\D/g, "").slice(0, 15);
+const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { ...JSON_HEADERS, ...headers } });
+const terminal = new Set(["completed", "cancelled", "closed", "expired", "rejected"]);
+const active = b => Number(b.active) === 1 && !terminal.has(String(b.status).toLowerCase());
+const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fromB64 = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+async function hmac(value, env) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.SESSION_SECRET || ""), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return b64(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
+}
+async function safeEqual(a, b) {
+  const x = new TextEncoder().encode(String(a ?? "")), y = new TextEncoder().encode(String(b ?? ""));
+  if (x.length !== y.length) return false;
+  let diff = 0; for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i]; return diff === 0;
+}
+async function sessionCookie(csrf, env) {
+  const payload = b64(new TextEncoder().encode(JSON.stringify({ admin: true, exp: now() + 8 * 60 * 60 * 1000, csrf })));
+  return payload + "." + await hmac(payload, env);
+}
+async function readSession(request, env) {
+  const raw = (request.headers.get("cookie") || "").split(";").map(x => x.trim()).find(x => x.startsWith(COOKIE + "="))?.slice(COOKIE.length + 1);
+  if (!raw || !env.SESSION_SECRET) return null;
+  const [payload, signature] = raw.split(".");
+  if (!payload || !signature || !await safeEqual(signature, await hmac(payload, env))) return null;
+  try { const data = JSON.parse(new TextDecoder().decode(fromB64(payload))); return data.admin && data.exp > now() ? data : null; } catch { return null; }
+}
+const cookieHeader = (value, maxAge = 28800) => COOKIE + "=" + value + "; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=" + maxAge;
+async function body(request) { try { return await request.json(); } catch { return {}; } }
+async function activity(db, reference, event) {
+  await db.prepare("INSERT INTO activity(reference,event,created_at) VALUES(?,?,?)").bind(reference || "", event, new Date().toISOString()).run();
+}
+async function expireBookings(db) {
+  const cutoff = new Date().toISOString();
+  const result = await db.prepare("UPDATE bookings SET active=0,status='expired' WHERE active=1 AND status NOT IN ('completed','cancelled','closed','expired','rejected') AND (trip_date || 'T' || trip_time || ':00') < ?").bind(cutoff).run();
+  return result.meta?.changes || 0;
+}
+function routePoints(b) { return [b.origin, ...(String(b.via || "").split(",")), b.destination].map(x => clean(x, 100).toLowerCase()).filter(Boolean); }
+function matchReason(a, b) {
+  const pa = routePoints(a), pb = routePoints(b), sa = new Set(pa.slice(0, -1).map((x, i) => x + "→" + pa[i + 1]));
+  if (pb.slice(0, -1).some((x, i) => sa.has(x + "→" + pb[i + 1]))) return "overlapping route";
+  if (pa[0] === pb[0] && pa.at(-1) === pb.at(-1)) return "same route";
+  if (pa.slice(1, -1).some(x => pb.includes(x)) || pb.slice(1, -1).some(x => pa.includes(x))) return "via/connecting route";
+  return "";
+}
+function findMatches(bookings) {
+  const list = bookings.filter(active), out = [];
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i], b = list[j]; if (a.role === b.role || a.trip_date !== b.trip_date) continue;
+    const mins = Math.abs(new Date(a.trip_date + "T" + a.trip_time) - new Date(b.trip_date + "T" + b.trip_time)) / 60000;
+    if (mins > 180) continue; const reason = matchReason(a, b); if (reason) out.push({ a, b, reason });
+  }
+  return out;
+}
+const summary = b => String(b.role).toUpperCase() + ": " + b.name + "\nMobile: " + b.phone + "\nRoute: " + b.origin + " → " + b.destination + (b.via ? " via " + b.via : "") + "\nTravel: " + b.trip_date + " at " + b.trip_time + (b.vehicle_type ? "\nVehicle: " + b.vehicle_type : "") + (b.capacity_kg ? " · Capacity: " + b.capacity_kg + " kg" : "") + (b.passenger_count ? " · Passengers: " + b.passenger_count : "") + "\nReference: " + b.reference;
+async function sendTelegram(text, env) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return false;
+  const r = await fetch("https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendMessage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, disable_web_page_preview: true }) });
+  return r.ok;
+}
+async function createBooking(request, env) {
+  const d = await body(request), role = clean(d.role, 12).toLowerCase();
+  const b = { role, name: clean(d.name, 80), phone: digits(d.phone), origin: clean(d.origin, 80), destination: clean(d.destination, 80), via: (Array.isArray(d.via) ? d.via : String(d.via || "").split(",")).map(x => clean(x, 80)).filter(Boolean).slice(0, 5).join(", "), trip_date: clean(d.trip_date, 10), trip_time: clean(d.trip_time, 5), vehicle_type: role === "driver" ? clean(d.vehicle_type, 20).toUpperCase() : "", capacity_kg: role === "driver" && ["TRUCK", "PICKUP"].includes(String(d.vehicle_type).toUpperCase()) ? String(Math.max(0, Number(d.capacity_kg) || 0)) : "", passenger_count: role === "driver" && String(d.vehicle_type).toUpperCase() === "CAR" ? String(Math.max(1, Math.min(20, Number(d.passenger_count) || 1))) : "" };
+  if (!["driver", "customer"].includes(role) || !b.name || b.phone.length < 10 || !b.origin || !b.destination || b.origin.toLowerCase() === b.destination.toLowerCase()) return json({ ok: false, error: "Please complete all required details and check your mobile number." }, 400);
+  if (role === "driver" && (!["TRUCK", "PICKUP", "CAR", "OTHER"].includes(b.vehicle_type) || (["TRUCK", "PICKUP"].includes(b.vehicle_type) && !Number(b.capacity_kg)) || (b.vehicle_type === "CAR" && !Number(b.passenger_count)))) return json({ ok: false, error: "Please complete the vehicle details." }, 400);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(b.trip_date) || !/^\d{2}:\d{2}$/.test(b.trip_time)) return json({ ok: false, error: "Enter a valid travel date and time." }, 400);
+  const trip = new Date(b.trip_date + "T" + b.trip_time + ":00");
+  if (!Number.isFinite(trip.getTime()) || trip.getTime() <= now() || trip.getTime() > now() + 365 * 86400000) return json({ ok: false, error: "Past date or time is not allowed. Choose a future travel time." }, 400);
+  const db = env.DB; await expireBookings(db);
+  const count = await db.prepare("SELECT COUNT(*) AS n FROM bookings WHERE phone=? AND role=? AND active=1 AND status NOT IN ('completed','cancelled','closed','expired','rejected') AND (trip_date || 'T' || trip_time || ':00') > ?").bind(b.phone, role, new Date().toISOString()).first();
+  if ((count?.n || 0) >= 5) return json({ ok: false, error: "This mobile number already has 5 active " + role + " requests. Complete or cancel an existing request before adding another." }, 409);
+  const id = crypto.randomUUID(), reference = crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase(), created = new Date().toISOString();
+  await db.prepare("INSERT INTO bookings(id,reference,role,name,phone,origin,destination,via,trip_date,trip_time,created_at,active,status,vehicle_type,capacity_kg,passenger_count) VALUES(?,?,?,?,?,?,?,?,?,?,?,1,'pending',?,?,?)").bind(id, reference, b.role, b.name, b.phone, b.origin, b.destination, b.via, b.trip_date, b.trip_time, created, b.vehicle_type, b.capacity_kg, b.passenger_count).run();
+  if (role === "driver" && d.additional_availability === true) await db.prepare("INSERT INTO driver_availability(booking_id,available_locations,created_at) VALUES(?,?,?)").bind(id, clean(d.available_locations, 500), created).run();
+  await activity(db, reference, "booking_created");
+  const receivers = await db.prepare("SELECT id,label,phone FROM receivers ORDER BY created_at").all();
+  const message = "Yahan booking hai\nBooking type: " + role.toUpperCase() + "\nName: " + b.name + "\nMobile: " + b.phone + "\nRoute: " + b.origin + " → " + b.destination + (b.via ? " via " + b.via : "") + "\nDate & time: " + b.trip_date + " | " + b.trip_time + (b.vehicle_type ? "\nVehicle: " + b.vehicle_type : "") + (b.capacity_kg ? "\nCapacity: " + b.capacity_kg + " kg" : "") + (b.passenger_count ? "\nPassengers: " + b.passenger_count : "") + "\nBooking ID: " + reference;
+  const links = (receivers.results || []).map(x => ({ id: x.id, label: x.label, url: "https://wa.me/" + digits(x.phone) + "?text=" + encodeURIComponent(message) }));
+  return json({ ok: true, reference, whatsapp_links: links, message: "Booking saved. Share it with the admin on WhatsApp." }, 201);
+}
+async function adminApi(request, env, path, session) {
+  const db = env.DB, method = request.method, d = await body(request);
+  if (method !== "GET" && !await safeEqual(request.headers.get("x-csrf-token"), session.csrf)) return json({ ok: false, error: "Security token expired. Refresh the dashboard." }, 403);
+  if (method === "GET" && path === "/api/admin-data") {
+    await expireBookings(db);
+    const [bookings, receivers, help, notified, activityRows, settings, availability] = await Promise.all([
+      db.prepare("SELECT * FROM bookings ORDER BY created_at DESC").all(), db.prepare("SELECT * FROM receivers ORDER BY created_at").all(),
+      db.prepare("SELECT * FROM help_contacts ORDER BY created_at").all(), db.prepare("SELECT COUNT(*) AS n FROM notifications").first(),
+      db.prepare("SELECT * FROM activity ORDER BY created_at DESC LIMIT 300").all(), db.prepare("SELECT value FROM settings WHERE key='expiry_hours'").first(),
+      db.prepare("SELECT da.*,b.reference,b.name,b.phone,b.origin,b.destination,b.trip_date,b.trip_time FROM driver_availability da JOIN bookings b ON b.id=da.booking_id ORDER BY da.created_at DESC").all()
+    ]);
+    const rows = bookings.results || [];
+    return json({ ok: true, csrf: session.csrf, bookings: rows, receivers: receivers.results || [], help_contacts: help.results || [], notified: notified?.n || 0, activity: activityRows.results || [], matches: findMatches(rows), expiry_hours: Number(settings?.value) || 12, driver_availability: availability.results || [] });
+  }
+  if (method === "POST" && path === "/api/booking-update") {
+    const fields = ["name","phone","origin","destination","via","trip_date","trip_time","role","vehicle_type","capacity_kg","passenger_count"];
+    const sets = [], values = []; for (const f of fields) if (d[f] !== undefined) { sets.push(f + "=?"); values.push(f === "phone" ? digits(d[f]) : clean(d[f], 500)); }
+    if (!d.id || !sets.length) return json({ ok: false, error: "No booking changes supplied." }, 400);
+    values.push(d.id); const r = await db.prepare("UPDATE bookings SET " + sets.join(",") + " WHERE id=?").bind(...values).run();
+    if (!r.meta?.changes) return json({ ok: false, error: "Booking not found." }, 404);
+    await activity(db, d.reference || "", "admin_edited"); return json({ ok: true, booking: { updated: true } });
+  }
+  if (method === "POST" && path === "/api/booking-status") {
+    const allowed = ["pending","approved","rejected","completed","cancelled","closed","expired"];
+    if (d.status && !allowed.includes(d.status)) return json({ ok: false, error: "Invalid booking status." }, 400);
+    const activeValue = typeof d.active === "boolean" ? (d.active ? 1 : 0) : undefined;
+    const statusValue = d.status || null;
+    if (!d.id) return json({ ok: false, error: "Booking ID is required." }, 400);
+    if (statusValue && ["rejected","completed","cancelled","closed","expired"].includes(statusValue)) await db.prepare("UPDATE bookings SET status=?,active=0 WHERE id=?").bind(statusValue, d.id).run();
+    else if (statusValue && activeValue !== undefined) await db.prepare("UPDATE bookings SET status=?,active=? WHERE id=?").bind(statusValue, activeValue, d.id).run();
+    else if (statusValue) await db.prepare("UPDATE bookings SET status=? WHERE id=?").bind(statusValue, d.id).run();
+    else if (activeValue !== undefined) await db.prepare("UPDATE bookings SET active=? WHERE id=?").bind(activeValue, d.id).run();
+    else return json({ ok: false, error: "No status change supplied." }, 400);
+    return json({ ok: true, booking: { updated: true } });
+  }
+  if (method === "POST" && path === "/api/booking-delete") {
+    await db.prepare("DELETE FROM bookings WHERE id=?").bind(d.id).run(); await activity(db, d.reference || "", "admin_deleted"); return json({ ok: true });
+  }
+  if (method === "POST" && path === "/api/expiry-setting") {
+    const hours = Number(d.hours); if (![6,12,24].includes(hours)) return json({ ok: false, error: "Choose 6, 12 or 24 hours." }, 400);
+    await db.prepare("INSERT INTO settings(key,value) VALUES('expiry_hours',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(String(hours)).run(); return json({ ok: true, expiry_hours: hours });
+  }
+  if (method === "POST" && path === "/api/receiver-add") {
+    const label = clean(d.label,50), phone = digits(d.phone); if (!label || phone.length < 10) return json({ ok: false, error: "Enter a label and valid number including country code." }, 400);
+    const id = crypto.randomUUID(); await db.prepare("INSERT INTO receivers(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); return json({ ok: true, receiver: { id,label,phone } });
+  }
+  if (method === "POST" && path === "/api/receiver-delete") { await db.prepare("DELETE FROM receivers WHERE id=?").bind(d.id).run(); return json({ ok: true }); }
+  if (method === "POST" && path === "/api/help-contact-add") {
+    const phone = digits(d.phone); if (phone.length < 10) return json({ ok:false,error:"Enter a valid WhatsApp number including country code." },400);
+    const count = await db.prepare("SELECT COUNT(*) AS n FROM help_contacts").first(); if ((count?.n || 0) >= 5) return json({ ok:false,error:"You can configure up to 5 help contacts." },409);
+    const id=crypto.randomUUID(), label="Contact Admin "+((count?.n||0)+1); await db.prepare("INSERT INTO help_contacts(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); return json({ok:true,contact:{id,label,phone}});
+  }
+  if (method === "POST" && path === "/api/help-contact-delete") { await db.prepare("DELETE FROM help_contacts WHERE id=?").bind(d.id).run(); return json({ok:true}); }
+  if (method === "GET" && path === "/api/public-config") {
+    const [receivers,help] = await Promise.all([db.prepare("SELECT id,label,phone FROM receivers ORDER BY created_at").all(),db.prepare("SELECT id,label,phone FROM help_contacts ORDER BY created_at").all()]);
+    return json({ok:true,receivers:receivers.results||[],help_contacts:help.results||[]});
+  }
+  if (method === "GET" && path === "/api/report.csv") {
+    const rows = await db.prepare("SELECT b.*, da.available_locations FROM bookings b LEFT JOIN driver_availability da ON da.booking_id=b.id ORDER BY b.trip_date,b.trip_time").all();
+    const keys = ["id","reference","role","name","phone","origin","destination","via","trip_date","trip_time","created_at","active","status","vehicle_type","capacity_kg","passenger_count","available_locations"];
+    const csv = [keys.join(","),...(rows.results||[]).map(r=>keys.map(k=>'"'+String(r[k]??"").replace(/"/g,'""')+'"').join(","))].join("\r\n");
+    return new Response(csv,{headers:{"content-type":"text/csv; charset=utf-8","content-disposition":'attachment; filename="routeadda-bookings.csv"',"cache-control":"no-store"}});
+  }
+  return json({ ok: false, error: "Not found." }, 404);
+}
+export default {
+ async fetch(request, env) {
+  const url = new URL(request.url), path = url.pathname;
+  try {
+   if (path.startsWith("/control/")) { const token = path.split("/")[2] || ""; return Response.redirect(new URL("/admin.html?token=" + encodeURIComponent(token), url), 302); }
+   if (!path.startsWith("/api/")) return env.ASSETS.fetch(request);
+   if (path === "/api/bookings" && request.method === "POST") return await createBooking(request, env);
+   if (path === "/api/booking-edit") return json({ok:false,error:"Public booking edits are disabled. Please contact an administrator on WhatsApp."},403);
+   if (path === "/api/whatsapp-click" && request.method === "POST") { const d=await body(request); await activity(env.DB,clean(d.reference,20),"whatsapp_link_opened"); return json({ok:true}); }
+   if (path === "/api/login" && request.method === "POST") {
+    const d=await body(request); if (!env.ADMIN_PASSWORD || !env.ADMIN_URL_TOKEN || !env.SESSION_SECRET) return json({ok:false,error:"Admin security is not configured."},503);
+    if (!await safeEqual(d.token,env.ADMIN_URL_TOKEN)) return json({ok:false,error:"Not found."},404);
+    if (!await safeEqual(d.password,env.ADMIN_PASSWORD)) return json({ok:false,error:"Incorrect password."},401);
+    const csrf=b64(crypto.getRandomValues(new Uint8Array(32))), value=await sessionCookie(csrf,env);
+    return json({ok:true,csrf},{headers:{"set-cookie":cookieHeader(value)}});
+   }
+   if (path === "/api/logout" && request.method === "POST") return json({ok:true},{headers:{"set-cookie":cookieHeader("",0)}});
+   if (path === "/api/match-check" && request.method === "POST") {
+    if (!env.CRON_SECRET || !await safeEqual(request.headers.get("x-cron-secret"),env.CRON_SECRET)) return json({ok:false},404);
+    const expired=await expireBookings(env.DB), result=await env.DB.prepare("SELECT * FROM bookings WHERE active=1").all(), matches=findMatches(result.results||[]); let notified=0;
+    for (const m of matches) { const pair=[m.a.reference,m.b.reference].sort().join(":"); const known=await env.DB.prepare("SELECT pair FROM notifications WHERE pair=?").bind(pair).first(); if(known) continue;
+     const ok=await sendTelegram("POSSIBLE DRIVER / CUSTOMER MATCH\n\n"+summary(m.a)+"\n\n"+summary(m.b)+"\n\nMatch: "+m.reason+"\nAdmin: review manually. No customer phone numbers included.",env);
+     if(ok){await env.DB.prepare("INSERT OR IGNORE INTO notifications(pair,created_at) VALUES(?,?)").bind(pair,new Date().toISOString()).run();notified++;}
+    }
+    return json({ok:true,expired,matched_pairs_notified:notified});
+   }
+   const session=await readSession(request,env); if(!session) return json({ok:false,error:"Please sign in again."},401);
+   return await adminApi(request,env,path,session);
+  } catch (error) { console.error("RouteADDA Worker error",error); return json({ok:false,error:"Server error. Please try again."},500); }
+ },
+ async scheduled(controller, env, ctx) {
+  ctx.waitUntil((async()=>{ const expired=await expireBookings(env.DB), r=await env.DB.prepare("SELECT * FROM bookings WHERE active=1").all(), matches=findMatches(r.results||[]);
+   for(const m of matches){const pair=[m.a.reference,m.b.reference].sort().join(":");const known=await env.DB.prepare("SELECT pair FROM notifications WHERE pair=?").bind(pair).first();if(known)continue;const ok=await sendTelegram("POSSIBLE DRIVER / CUSTOMER MATCH\n\n"+summary(m.a)+"\n\n"+summary(m.b)+"\n\nMatch: "+m.reason+"\nAdmin: review manually. No customer phone numbers included.",env);if(ok)await env.DB.prepare("INSERT OR IGNORE INTO notifications(pair,created_at) VALUES(?,?)").bind(pair,new Date().toISOString()).run();}
+  })());
+ }
+};
