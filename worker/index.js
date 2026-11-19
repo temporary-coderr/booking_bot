@@ -145,7 +145,7 @@ async function adminApi(request, env, path, session) {
     const colName = n => { let s=""; for(n++;n;n=Math.floor((n-1)/26)) s=String.fromCharCode(65+(n-1)%26)+s; return s; };
     const makeSheet = (role) => {
       const list = (rows.results || []).filter(r => r.role === role).sort((a,b) => {
-        const pa=String(a.phone||"").replace(/\\D/g,""), pb=String(b.phone||"").replace(/\\D/g,"");
+        const pa=String(a.phone||"").replace(/\D/g,""), pb=String(b.phone||"").replace(/\\D/g,"");
         return pa.localeCompare(pb,undefined,{numeric:true}) || String(a.trip_date||"").localeCompare(String(b.trip_date||"")) || String(a.trip_time||"").localeCompare(String(b.trip_time||""));
       });
       const all = [labels, ...list.map(r => keys.map(k => r[k]))];
