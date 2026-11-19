@@ -1,0 +1,24 @@
+{
+  "id": "/",
+  "name": "RouteADDA — Your Journey, Connected",
+  "short_name": "RouteADDA",
+  "description": "Post rides and connect with drivers and customers.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "background_color": "#f4f7fc",
+  "theme_color": "#10284b",
+  "lang": "en-IN",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
