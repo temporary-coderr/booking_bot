@@ -43,3 +43,5 @@ jobs:
               raise SystemExit(f"Missing D1 tables: {sorted(missing)}")
           print("D1 migration valid; all required tables exist.")
           PY
+      - name: Test D1 booking rules and retention
+        run: python3 -m unittest tests/test_cloudflare_d1.py
