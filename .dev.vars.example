@@ -1,0 +1,7 @@
+ADMIN_PASSWORD=change-this-local-password
+ADMIN_URL_TOKEN=local-admin-access-token
+SESSION_SECRET=replace-with-a-long-random-secret
+CRON_SECRET=local-cron-secret
+# Optional Telegram notifications for local testing:
+# TELEGRAM_BOT_TOKEN=
+# TELEGRAM_CHAT_ID=
