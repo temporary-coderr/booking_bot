@@ -188,6 +188,32 @@ async function createBooking(request, env) {
 async function adminApi(request, env, path, session) {
   const db = env.DB, method = request.method, d = await body(request);
   if (method !== "GET" && !await safeEqual(request.headers.get("x-csrf-token"), session.csrf)) return json({ ok: false, error: "Security token expired. Refresh the dashboard." }, 403);
+  if (method === "POST" && path === "/api/telegram-test") {
+    if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return json({ ok: false, error: "Telegram is not configured on the server." }, 503);
+    const sent = await sendTelegram("RouteADDA Telegram test successful. Your bot connection is working.", env);
+    await activity(db, "", sent ? "telegram_test_sent" : "telegram_test_failed");
+    if (!sent) return json({ ok: false, error: "Telegram rejected the test message. Check the server-side bot token and chat ID." }, 502);
+    return json({ ok: true, message: "Test message sent to the configured Telegram chat." });
+  }
+  if (method === "POST" && path === "/api/admin-match-check") {
+    if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return json({ ok: false, error: "Telegram is not configured on the server." }, 503);
+    const expired = await expireBookings(db);
+    const result = await db.prepare("SELECT * FROM bookings WHERE active=1").all();
+    const matches = findMatches(result.results || []);
+    let notified = 0, skipped = 0, failed = 0;
+    for (const m of matches) {
+      const pair = [m.a.reference, m.b.reference].sort().join(":");
+      const known = await db.prepare("SELECT pair FROM notifications WHERE pair=?").bind(pair).first();
+      if (known) { skipped++; continue; }
+      const sent = await sendTelegram("POSSIBLE DRIVER / CUSTOMER MATCH\\n\\n" + summary(m.a) + "\\n\\n" + summary(m.b) + "\\n\\nMatch: " + m.reason + "\\nAdmin: review manually. No customer phone numbers included.", env);
+      if (sent) {
+        await db.prepare("INSERT OR IGNORE INTO notifications(pair,created_at) VALUES(?,?)").bind(pair, new Date().toISOString()).run();
+        notified++;
+      } else failed++;
+    }
+    await activity(db, "", "admin_match_check");
+    return json({ ok: true, expired, total_possible_matches: matches.length, matched_pairs_notified: notified, already_notified: skipped, failed });
+  }
   if (method === "GET" && path === "/api/admin-data") {
     await expireBookings(db);
     const [bookings, receivers, help, notified, activityRows, settings, availability] = await Promise.all([
