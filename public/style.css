@@ -144,3 +144,6 @@ body.public-home{background:#06150f;color:#f5faf6;font-family:'DM Sans','Noto Sa
   outline: 2px solid #20d978;
   outline-offset: 2px;
 }
+
+/* Activity history filters and pagination */
+.activity-filters{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}.activity-filters label{margin:0;color:#53647b;font-size:11px}.activity-filters select{display:block;width:100%;margin-top:6px;padding:10px 12px;border:1px solid #cbd9d0;border-radius:10px;background:#fff;color:var(--ink);font:inherit}.activity-pagination{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px}.activity-pagination button:disabled{opacity:.45;cursor:not-allowed}#activity-list{max-height:420px;overflow:auto;border-top:1px solid var(--line);margin-top:10px}#activity-list .activity-row{padding:10px 2px;border-bottom:1px solid #edf0f4;overflow-wrap:anywhere}#activity-list .activity-row strong{display:block;color:var(--ink);font-size:11px}#activity-list .activity-row small{display:block;color:var(--muted);font-size:10px;margin-top:3px}@media(max-width:520px){.activity-filters{grid-template-columns:1fr}}
