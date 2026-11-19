@@ -57,7 +57,7 @@ function findMatches(bookings) {
   }
   return out;
 }
-const summary = b => String(b.role).toUpperCase() + ": " + b.name + "\nMobile: " + b.phone + "\nRoute: " + b.origin + " → " + b.destination + (b.via ? " via " + b.via : "") + "\nTravel: " + b.trip_date + " at " + b.trip_time + (b.vehicle_type ? "\nVehicle: " + b.vehicle_type : "") + (b.capacity_kg ? " · Capacity: " + b.capacity_kg + " kg" : "") + (b.passenger_count ? " · Passengers: " + b.passenger_count : "") + "\nReference: " + b.reference;
+const summary = b => String(b.role).toUpperCase() + ": " + b.name + "\nRoute: " + b.origin + " → " + b.destination + (b.via ? " via " + b.via : "") + "\nTravel: " + b.trip_date + " at " + b.trip_time + (b.vehicle_type ? "\nVehicle: " + b.vehicle_type : "") + (b.capacity_kg ? " · Capacity: " + b.capacity_kg + " kg" : "") + (b.passenger_count ? " · Passengers: " + b.passenger_count : "") + "\nReference: " + b.reference;
 async function sendTelegram(text, env) {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return false;
   const r = await fetch("https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendMessage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, disable_web_page_preview: true }) });
@@ -131,8 +131,8 @@ async function adminApi(request, env, path, session) {
   if (method === "POST" && path === "/api/receiver-delete") { await db.prepare("DELETE FROM receivers WHERE id=?").bind(d.id).run(); return json({ ok: true }); }
   if (method === "POST" && path === "/api/help-contact-add") {
     const phone = digits(d.phone); if (phone.length < 10) return json({ ok:false,error:"Enter a valid WhatsApp number including country code." },400);
-    const count = await db.prepare("SELECT COUNT(*) AS n FROM help_contacts").first(); if ((count?.n || 0) >= 5) return json({ ok:false,error:"You can configure up to 5 help contacts." },409);
-    const id=crypto.randomUUID(), label="Contact Admin "+((count?.n||0)+1); await db.prepare("INSERT INTO help_contacts(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); return json({ok:true,contact:{id,label,phone}});
+    const existing = await db.prepare("SELECT label FROM help_contacts").all(); const labels = new Set((existing.results||[]).map(x=>x.label)); if (labels.size >= 5) return json({ ok:false,error:"You can configure up to 5 help contacts." },409);
+    let number=1; while(labels.has("Contact Admin "+number)) number++; const id=crypto.randomUUID(), label="Contact Admin "+number; await db.prepare("INSERT INTO help_contacts(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); return json({ ok:true,contact:{id,label,phone} });
   }
   if (method === "POST" && path === "/api/help-contact-delete") { await db.prepare("DELETE FROM help_contacts WHERE id=?").bind(d.id).run(); return json({ok:true}); }
   if (method === "GET" && path === "/api/report.csv") {
