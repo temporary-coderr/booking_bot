@@ -6,5 +6,40 @@ const today=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOff
 function renderLinks(items,ref){const links=document.getElementById("whatsapp-links");links.replaceChildren();items.forEach(item=>{const a=document.createElement("a");a.className="wa-button";a.href=item.url;a.target="_blank";a.rel="noopener noreferrer";a.textContent=tr("share")+item.label;a.addEventListener("click",()=>fetch("/api/whatsapp-click",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reference:ref})}).catch(()=>{}));links.appendChild(a)});if(!items.length){const p=document.createElement("p");p.className="muted";p.textContent=tr("noReceiver");links.appendChild(p)}}
 document.getElementById("find-booking").addEventListener("click",()=>{const ref=prompt(tr("findRef"));if(ref)editBooking(ref.trim().toUpperCase())});
 form.addEventListener("submit",async e=>{e.preventDefault();status.textContent="";status.classList.remove("error-text");if(!form.checkValidity()){form.reportValidity();status.textContent=lang==="hi"?"कृपया सभी जरूरी जानकारी भरें।":"Please complete all required fields.";status.classList.add("error-text");return}if(!validateFuture(date.value,time.value)){status.textContent=tr("future");status.classList.add("error-text");return}button.disabled=true;button.textContent=tr("saving");const data=Object.fromEntries(new FormData(form));data.role=role();data.via=[1,2,3,4,5].map(i=>data["via_city_"+i]||"").filter(Boolean).join(", ");try{const res=await fetch("/api/bookings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)}),out=await res.json();if(!res.ok||!out.ok)throw Error(out.error||tr("failed"));localStorage.setItem("booking-owner-"+out.reference,JSON.stringify({edit_token:out.edit_token,phone:data.phone,data}));document.getElementById("success-message").textContent=tr("saved")+" "+out.reference+". "+tr("savedTail");renderLinks(out.whatsapp_links||[],out.reference);document.getElementById("edit-booking").hidden=false;document.getElementById("edit-booking").onclick=()=>editBooking(out.reference);success.hidden=false;success.scrollIntoView({behavior:"smooth",block:"center"});form.reset();date.value=today();updateRole()}catch(err){status.textContent=err.message;status.classList.add("error-text")}finally{button.disabled=false;buttonText()}});
-async function editBooking(ref){const saved=localStorage.getItem("booking-owner-"+ref);if(!saved){alert(tr("noEdit"));return}const owner=JSON.parse(saved),phone=prompt(tr("phoneConfirm"),owner.phone);if(phone===null)return;const fields=["name","origin","destination","via","trip_date","trip_time","vehicle_type","capacity_kg","passenger_count"],changes={reference:ref,phone,edit_token:owner.edit_token};for(const f of fields){const v=prompt(tr("editField")+" "+f.replaceAll("_"," ")+":",owner.data?.[f]||"");if(v===null)return;changes[f]=v}try{const res=await fetch("/api/booking-edit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(changes)}),out=await res.json();if(!res.ok||!out.ok)throw Error(out.error||tr("editFail"));owner.phone=phone;owner.data={...owner.data,...changes};localStorage.setItem("booking-owner-"+ref,JSON.stringify(owner));alert(tr("updated"));location.reload()}catch(err){alert(err.message)}}applyLanguage("hi");
+async function editBooking(ref){const saved=localStorage.getItem("booking-owner-"+ref);if(!saved){alert(tr("noEdit"));return}const owner=JSON.parse(saved),phone=prompt(tr("phoneConfirm"),owner.phone);if(phone===null)return;const fields=["name","origin","destination","via","trip_date","trip_time","vehicle_type","capacity_kg","passenger_count"],changes={reference:ref,phone,edit_token:owner.edit_token};for(const f of fields){const v=prompt(tr("editField")+" "+f.replaceAll("_"," ")+":",owner.data?.[f]||"");if(v===null)return;changes[f]=v}try{const res=await fetch("/api/booking-edit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(changes)}),out=await res.json();if(!res.ok||!out.ok)throw Error(out.error||tr("editFail"));owner.phone=phone;owner.data={...owner.data,...changes};localStorage.setItem("booking-owner-"+ref,JSON.stringify(owner));alert(tr("updated"));location.reload()}catch(err){alert(err.message)}}
+const installButton=document.getElementById("app-install");
+let deferredInstallPrompt=null;
+const isStandalone=()=>window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone===true;
+if(installButton){
+  if(isStandalone()){installButton.hidden=true;}
+  window.addEventListener("beforeinstallprompt",event=>{
+    event.preventDefault();
+    deferredInstallPrompt=event;
+    installButton.hidden=false;
+    installButton.textContent=lang==="hi"?"ऐप इंस्टॉल करें":"↓ Install App";
+  });
+  window.addEventListener("appinstalled",()=>{
+    deferredInstallPrompt=null;
+    installButton.hidden=true;
+  });
+  installButton.addEventListener("click",async()=>{
+    if(isStandalone()){installButton.hidden=true;return;}
+    if(deferredInstallPrompt){
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt=null;
+      return;
+    }
+    const isAppleMobile=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+    const message=isAppleMobile
+      ?(lang==="hi"?"RouteADDA इंस्टॉल करने के लिए Safari में Share बटन दबाएँ, फिर “Add to Home Screen” चुनें।":"To install RouteADDA, open the Share menu in Safari and choose “Add to Home Screen”.")
+      :(lang==="hi"?"इस ब्राउज़र के मेन्यू (⋮ या Share) में “Install app”, “Add to Home Screen” या “Create shortcut” चुनें। यदि विकल्प न दिखे, Chrome या Edge में वेबसाइट खोलें।":"Open your browser menu (⋮ or Share) and choose “Install app”, “Add to Home Screen” or “Create shortcut”. If unavailable, open this site in Chrome or Edge.");
+    alert(message);
+  });
+}
+if("serviceWorker" in navigator){
+  window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));
+}
+
+applyLanguage("hi");
 })();
