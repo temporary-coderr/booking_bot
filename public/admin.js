@@ -8,6 +8,34 @@
  async function refresh(){const j=await api("admin-data");data=j;render();document.getElementById("expiry-hours").value=String(j.expiry_hours||12);status("Dashboard updated.")}
  function renderRoleGroups(role,targetId,searchId,countId){
   const query=document.getElementById(searchId).value.trim().toLowerCase();
+  const groups=new Map();
+  data.bookings.filter(b=>b.role===role).forEach(b=>{
+   const digits=String(b.phone||"").replace(/\D/g,"");
+   const key=digits||("no-phone:"+String(b.id));
+   if(!groups.has(key))groups.set(key,[]);
+   groups.get(key).push(b);
+  });
+  const visible=[];
+  for(const [key,items] of groups){
+   items.sort((a,b)=>(String(a.trip_date||"")+" "+String(a.trip_time||"")).localeCompare(String(b.trip_date||"")+" "+String(b.trip_time||"")));
+   const matches=items.filter(b=>[b.name,b.phone,b.origin,b.destination,b.via,b.trip_date,b.trip_time,b.status,b.reference].join(" ").toLowerCase().includes(query));
+   if(matches.length)visible.push({phone:items[0].phone||"Phone not provided",items:matches,total:items.length,key});
+  }
+  visible.sort((a,b)=>String(a.phone).localeCompare(String(b.phone),undefined,{numeric:true}));
+  document.getElementById(countId).textContent=visible.length+" people";
+  document.getElementById(targetId).innerHTML=visible.map(group=>{
+   const entries=group.items.map((b,i)=>'<article class="group-booking"><div class="group-booking-top"><b>Booking '+(i+1)+'</b><span class="status-chip">'+esc(b.status||"pending")+' · '+(String(b.active)==="false"||String(b.active)==="0"?"inactive":"active")+'</span></div><strong>'+esc(b.name||"Name not provided")+'</strong><span class="group-route">'+esc(b.origin||"—")+' → '+esc(b.destination||"—")+(b.via?' · via '+esc(b.via):"")+'</span><small>'+esc(b.trip_date||"Date not set")+' · '+esc(b.trip_time||"Time not set")+' · Ref '+esc(b.reference||"—")+'</small><small>'+esc(b.vehicle_type||"")+(b.capacity_kg?" · "+esc(b.capacity_kg)+" kg":"")+(b.passenger_count?" · "+esc(b.passenger_count)+" passengers":"")+'</small></article>').join("");
+   return '<article class="phone-group"><div class="phone-group-heading"><div><strong>☎ '+esc(group.phone)+'</strong><small>'+group.items.length+' shown / '+group.total+' booking(s)</small></div></div><div class="phone-group-bookings">'+entries+'</div></article>';
+  }).join("")||'<p class="empty-state">No '+(role==="driver"?"driver":"customer")+' bookings match this search.</p>';
+ }
+ function render(){
+  document.getElementById("total-count").textContent=data.bookings.length;
+  document.getElementById("match-count").textContent=data.matches.length;
+  document.getElementById("notified-count").textContent=data.notified||0;
+  document.getElementById("active-count").textContent=data.bookings.filter(b=>Number(b.active)===1||b.active===true||String(b.active)==="true").length;
+  const q=document.getElementById("search").value.toLowerCase(),role=document.getElementById("role-filter").value,st=document.getElementById("status-filter").value;
+  const filtered=data.bookings.filter(b=>(!role||b.role===role)&&(!st||b.status===st)&&[b.name,b.phone,b.origin,b.destination,b.via,b.trip_date,b.reference].join(" ").toLowerCase().includes(q));
+  document.getElementById("booking-list").innerHTML=filtered.map(b=>`<article class="booking-row"><div class="booking-main"><span class="type-chip ${esc(b.role)}">${esc(b.role)}</span><b>${esc(b.name)}</b><span>${esc(b.origin)} → ${esc(b.destination)} ${b.via?"via "+esc(b.via):""}</span><span>Vehicle: ${esc(b.vehicle_type||"—")} · ${esc(b.capacity_kg||"—")} kg ${b.passenger_count?"· "+esc(b.passenger_count)+" passengers":""}</span><small>${esc(b.trip_date)} · ${esc(b.trip_time)} · Ref ${esc(b.reference)}</small><strong class="private-phone">☎ <a href="tel:${esc(b.phone)}">${esc(b.phone)}</a></strong><span class="status-chip">${esc(b.status||"pending")} · ${String(b.active)==="false"||String(b.active)==="0"?"inactive":"active"}</span><div class="inline-actions"><a class="outline-button small" href="https://wa.me/${esc(b.phone)}?text=${encodeURIComponent("Hello "+b.name+", regarding your booking "+b.reference+".")}" target="_blank" rel="noopener">Contact on WhatsApp</a><button class="outline-button small" data-edit="${esc(b.id)}">Edit</button><button class="outline-button small" data-status="${esc(b.id)}" data-active="${String(b.active)}">${String(b.active)==="false"||String(b.active)==="0"?"Reactivate":"Deactivate"}</button><select data-setstatus="${esc(b.id)}"><option value="">Change status…</option><option>pending</option><option>approved</option><option>rejected</option><option>completed</option></select><button class="danger-button small" data-delete="${esc(b.id)}" data-reference="${esc(b.reference)}">Delete</button></div></div></article>`).join("")||'<p class="empty-state">No matching bookings.</p>';
   renderRoleGroups("driver","driver-group-list","driver-group-search","driver-group-count");
   renderRoleGroups("customer","customer-group-list","customer-group-search","customer-group-count");
   document.getElementById("driver-availability-list").innerHTML=(data.driver_availability||[]).map(a=>'<article class="booking-row"><b>'+esc(a.name)+' · '+esc(a.phone)+'</b><span>'+esc(a.origin)+' → '+esc(a.destination)+' · '+esc(a.trip_date)+' '+esc(a.trip_time)+'</span><small>Other available locations: '+esc(a.available_locations||"Not specified")+'</small></article>').join("")||'<p class="empty-state">No drivers have marked extra availability.</p>';
