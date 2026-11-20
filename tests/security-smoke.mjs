@@ -51,6 +51,11 @@ async function expectStatus(result, status, label) {
   assert.equal(result.response.status, status, label + ": " + JSON.stringify(result.data));
 }
 
+const dateParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("-");
+const tomorrow = new Date(Date.UTC(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]) + 1));
+const tripDate = tomorrow.getUTCFullYear()+"-"+String(tomorrow.getUTCMonth()+1).padStart(2,"0")+"-"+String(tomorrow.getUTCDate()).padStart(2,"0");
+const publicBooking = await call("/api/bookings", { body: { role: "customer", name: "CI Privacy Test", phone: "919876543210", origin: "Jaora", destination: "Indore", trip_date: tripDate, trip_time: "23:59" } });
+await expectStatus(publicBooking, 201, "public booking creation");
 const privatePage = await call(ADMIN_PATH);
 await expectStatus(privatePage, 200, "private admin route");
 assert.match(privatePage.text, /Administrator sign in/, "private route should serve admin login");
@@ -93,7 +98,10 @@ await expectStatus(viewer, 200, "Viewer first login");
 assert.equal(viewer.data.mfaRequired, true, "Viewer must also enrol MFA");
 const viewerMfa = await enrolMfa(viewer.cookie, viewer.data.csrf);
 await expectStatus(await call("/api/booking-status", { cookie: viewer.cookie, csrf: viewer.data.csrf, body: { id: "nonexistent", active: false } }), 403, "Viewer cannot mutate bookings");
+const viewerData = await call("/api/admin-data", { cookie: viewer.cookie });
+await expectStatus(viewerData, 200, "Viewer read-only dashboard");
 await expectStatus(await call("/api/security-overview", { cookie: viewer.cookie }), 403, "Viewer cannot inspect admin sessions");
+assert.ok(viewerData.data.bookings.every(b => !String(b.phone).endsWith("3210") || String(b.phone).startsWith("••")), "Viewer must not receive raw customer phone numbers");
 
 await expectStatus(await call("/api/logout", { cookie: owner.cookie, csrf: owner.data.csrf, body: {} }), 200, "Owner logout");
 const recoveryLogin = await login("owner", "OwnerRestoredPass2026!", "", ownerMfa.codes[0]);
