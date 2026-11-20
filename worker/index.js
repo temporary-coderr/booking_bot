@@ -304,7 +304,10 @@ async function adminApi(request, env, path, session) {
     await auditSecurity("booking_status_changed",d.id||"",{status:statusValue||"",active:activeValue}); return json({ ok: true, booking: { updated: true } });
   }
   if (method === "POST" && path === "/api/booking-delete") {
-    await db.prepare("DELETE FROM bookings WHERE id=?").bind(d.id).run(); await activity(db, d.reference || "", "admin_deleted"); await auditSecurity("booking_deleted",d.reference||""); return json({ ok: true });
+    if (!d.id) return json({ok:false,error:"Booking ID is required."},400);
+    const deleted = await db.prepare("DELETE FROM bookings WHERE id=?").bind(d.id).run();
+    if (!deleted.meta?.changes) return json({ok:false,error:"Booking not found."},404);
+    await activity(db, d.reference || "", "admin_deleted"); await auditSecurity("booking_deleted",d.reference||""); return json({ ok: true });
   }
   if (method === "POST" && path === "/api/expiry-setting") {
     const hours = Number(d.hours); if (![6,12,24].includes(hours)) return json({ ok: false, error: "Choose 6, 12 or 24 hours." }, 400);
@@ -314,13 +317,13 @@ async function adminApi(request, env, path, session) {
     const label = clean(d.label,50), phone = digits(d.phone); if (!label || phone.length < 10) return json({ ok: false, error: "Enter a label and valid number including country code." }, 400);
     const id = crypto.randomUUID(); await db.prepare("INSERT INTO receivers(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); await auditSecurity("whatsapp_receiver_added",id,{label}); return json({ ok: true, receiver: { id,label,phone } });
   }
-  if (method === "POST" && path === "/api/receiver-delete") { await db.prepare("DELETE FROM receivers WHERE id=?").bind(d.id).run(); await auditSecurity("whatsapp_receiver_deleted",d.id||""); return json({ ok: true }); }
+  if (method === "POST" && path === "/api/receiver-delete") { if(!d.id)return json({ok:false,error:"Receiver ID is required."},400); const result=await db.prepare("DELETE FROM receivers WHERE id=?").bind(d.id).run(); if(!result.meta?.changes)return json({ok:false,error:"Receiver not found."},404); await auditSecurity("whatsapp_receiver_deleted",d.id); return json({ ok: true }); }
   if (method === "POST" && path === "/api/help-contact-add") {
     const phone = digits(d.phone); if (phone.length < 10) return json({ ok:false,error:"Enter a valid WhatsApp number including country code." },400);
     const existing = await db.prepare("SELECT label FROM help_contacts").all(); const labels = new Set((existing.results||[]).map(x=>x.label)); if (labels.size >= 5) return json({ ok:false,error:"You can configure up to 5 help contacts." },409);
     let number=1; while(labels.has("Contact Admin "+number)) number++; const id=crypto.randomUUID(), label="Contact Admin "+number; await db.prepare("INSERT INTO help_contacts(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); await auditSecurity("help_contact_added",id,{label}); return json({ ok:true,contact:{id,label,phone} });
   }
-  if (method === "POST" && path === "/api/help-contact-delete") { await db.prepare("DELETE FROM help_contacts WHERE id=?").bind(d.id).run(); await auditSecurity("help_contact_deleted",d.id||""); return json({ok:true}); }
+  if (method === "POST" && path === "/api/help-contact-delete") { if(!d.id)return json({ok:false,error:"Contact ID is required."},400); const result=await db.prepare("DELETE FROM help_contacts WHERE id=?").bind(d.id).run(); if(!result.meta?.changes)return json({ok:false,error:"Contact not found."},404); await auditSecurity("help_contact_deleted",d.id); return json({ok:true}); }
   if (method === "GET" && path === "/api/report.xlsx") {
     await auditSecurity("booking_export_xlsx"); const rows = await db.prepare("SELECT b.*, da.available_locations FROM bookings b LEFT JOIN driver_availability da ON da.booking_id = b.id").all();
     const keys = ["id","reference","role","name","phone","origin","destination","via","trip_date","trip_time","created_at","active","status","vehicle_type","capacity_kg","passenger_count","available_locations"];
