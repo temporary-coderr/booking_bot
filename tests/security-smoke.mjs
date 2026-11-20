@@ -39,43 +39,75 @@ async function login(username, password, code = "", recovery_code = "") {
 }
 async function enrolMfa(cookie, csrf) {
   const setup = await call("/api/mfa-setup", { cookie, csrf, body: {} });
-  assert.equal(setup.response.status, 200, "MFA setup should succeed");
+  assert.equal(setup.response.status, 200, "MFA setup should succeed: " + JSON.stringify(setup.data));
   assert.ok(setup.data.otpauth_uri.startsWith("otpauth://totp/"), "MFA should return an authenticator URI");
   const confirmed = await call("/api/mfa-confirm", { cookie, csrf, body: { code: totp(setup.data.secret) } });
-  assert.equal(confirmed.response.status, 200, "MFA confirmation should succeed");
+  assert.equal(confirmed.response.status, 200, "MFA confirmation should succeed: " + JSON.stringify(confirmed.data));
   assert.equal(confirmed.data.recovery_codes.length, 10, "ten one-time recovery codes should be issued");
-  return confirmed.data.recovery_codes;
+  return { secret: setup.data.secret, codes: confirmed.data.recovery_codes };
 }
-async function assertStatus(result, status, label) {
+async function expectStatus(result, status, label) {
   assert.equal(result.response.status, status, label + ": " + JSON.stringify(result.data));
 }
 
 const privatePage = await call(ADMIN_PATH);
-await assertStatus(privatePage, 200, "private admin route");
+await expectStatus(privatePage, 200, "private admin route");
 assert.match(await privatePage.response.text(), /Administrator sign in/, "private route should serve admin login");
-await assertStatus(await call("/admin.html"), 404, "direct admin HTML must be blocked");
-await assertStatus(await call("/api/login", { body: { username: "owner", password: OWNER_PASSWORD }, headers: { origin: "https://attacker.invalid" } }), 403, "cross-origin login must be rejected");
+await expectStatus(await call("/admin.html"), 404, "direct admin HTML must be blocked");
+await expectStatus(await call("/api/login", { body: { username: "owner", password: OWNER_PASSWORD }, headers: { origin: "https://attacker.invalid" } }), 403, "cross-origin login must be rejected");
 
 let owner = await login("owner", OWNER_PASSWORD);
-await assertStatus(owner, 200, "initial Owner login");
+await expectStatus(owner, 200, "initial Owner login");
 assert.equal(owner.data.mfaRequired, true, "first login must require MFA enrolment");
-let ownerRecovery = await enrolMfa(owner.cookie, owner.data.csrf);
+let ownerMfa = await enrolMfa(owner.cookie, owner.data.csrf);
 let ownerData = await call("/api/admin-data", { cookie: owner.cookie });
-await assertStatus(ownerData, 200, "Owner dashboard");
+await expectStatus(ownerData, 200, "Owner dashboard");
 assert.equal(ownerData.data.admin.role, "owner", "Owner role must be returned");
 
-await assertStatus(await call("/api/admin-create", { cookie: owner.cookie, csrf: owner.data.csrf, body: { username: "helperadmin", display_name: "Helper Admin", role: "admin", password: "HelperAdminPass2026!" } }), 200, "Owner creates individual Admin");
+await expectStatus(await call("/api/admin-create", { cookie: owner.cookie, csrf: owner.data.csrf, body: { username: "helperadmin", display_name: "Helper Admin", role: "admin", password: "HelperAdminPass2026!" } }), 200, "Owner creates individual Admin");
 let admin = await login("helperadmin", "HelperAdminPass2026!");
-await assertStatus(admin, 200, "Admin first login");
+await expectStatus(admin, 200, "Admin first login");
 assert.equal(admin.data.mfaRequired, true, "new Admin must enrol MFA");
-const adminRecovery = await enrolMfa(admin.cookie, admin.data.csrf);
+let adminMfa = await enrolMfa(admin.cookie, admin.data.csrf);
 let adminOverview = await call("/api/security-overview", { cookie: admin.cookie });
-await assertStatus(adminOverview, 200, "Admin can see active sessions");
+await expectStatus(adminOverview, 200, "Admin can see active sessions");
 assert.ok(adminOverview.data.sessions.length >= 2, "Owner and Admin sessions should be visible");
-await assertStatus(await call("/api/admin-create", { cookie: admin.cookie, csrf: admin.data.csrf, body: { username: "badadmin", display_name: "Bad", role: "admin", password: "BadAdminPass2026!" } }), 403, "Admin cannot create another admin");
-await assertStatus(await call("/api/admin-lock-owner", { cookie: admin.cookie, csrf: admin.data.csrf, body: { code: totp((await call("/api/mfa-setup", { cookie: admin.cookie, csrf: admin.data.csrf, body: {} })).data.secret || "") } }), 403, "already enrolled Admin cannot restart MFA setup");
+await expectStatus(await call("/api/admin-create", { cookie: admin.cookie, csrf: admin.data.csrf, body: { username: "badadmin", display_name: "Bad", role: "admin", password: "BadAdminPass2026!" } }), 403, "Admin cannot create another admin");
 
-const adminLockCode = totp((await call("/api/mfa-setup", { cookie: admin.cookie, csrf: admin.data.csrf, body: {} })).data.secret || "");
-// The previous call is expected to refuse re-enrolment; use a fresh authenticator code from the original secret captured below instead.
-assert.ok(adminRecovery.length === 10, "Admin recovery codes must be issued");
+await expectStatus(await call("/api/admin-lock-owner", { cookie: admin.cookie, csrf: admin.data.csrf, body: { code: totp(adminMfa.secret) } }), 200, "trusted Admin can emergency-lock Owner");
+await expectStatus(await login("owner", OWNER_PASSWORD), 401, "locked Owner cannot log in");
+await expectStatus(await call("/api/owner-recovery", { body: { username: "owner", recovery_secret: RECOVERY_SECRET, new_password: "OwnerRestoredPass2026!" } }), 200, "Owner emergency recovery");
+await expectStatus(await call("/api/admin-data", { cookie: admin.cookie }), 401, "Owner recovery revokes every existing session");
 
+owner = await login("owner", "OwnerRestoredPass2026!");
+await expectStatus(owner, 200, "Owner can sign in after recovery");
+assert.equal(owner.data.mfaRequired, true, "Owner recovery must force MFA re-enrolment");
+ownerMfa = await enrolMfa(owner.cookie, owner.data.csrf);
+ownerData = await call("/api/admin-data", { cookie: owner.cookie });
+await expectStatus(ownerData, 200, "recovered Owner dashboard");
+
+await expectStatus(await call("/api/admin-create", { cookie: owner.cookie, csrf: owner.data.csrf, body: { username: "readonly", display_name: "Read Only", role: "viewer", password: "ReadOnlyPass2026!" } }), 200, "Owner creates Viewer");
+let viewer = await login("readonly", "ReadOnlyPass2026!");
+await expectStatus(viewer, 200, "Viewer first login");
+assert.equal(viewer.data.mfaRequired, true, "Viewer must also enrol MFA");
+const viewerMfa = await enrolMfa(viewer.cookie, viewer.data.csrf);
+await expectStatus(await call("/api/booking-status", { cookie: viewer.cookie, csrf: viewer.data.csrf, body: { id: "nonexistent", active: false } }), 403, "Viewer cannot mutate bookings");
+await expectStatus(await call("/api/security-overview", { cookie: viewer.cookie }), 403, "Viewer cannot inspect admin sessions");
+
+await expectStatus(await call("/api/logout", { cookie: owner.cookie, csrf: owner.data.csrf, body: {} }), 200, "Owner logout");
+const recoveryLogin = await login("owner", "OwnerRestoredPass2026!", "", ownerMfa.codes[0]);
+await expectStatus(recoveryLogin, 200, "one-time recovery code login");
+await expectStatus(await login("owner", "OwnerRestoredPass2026!", "", ownerMfa.codes[0]), 401, "recovery code cannot be reused");
+
+owner = await login("owner", "OwnerRestoredPass2026!", totp(ownerMfa.secret));
+await expectStatus(owner, 200, "Owner MFA login");
+await expectStatus(await call("/api/password-change", { cookie: owner.cookie, csrf: owner.data.csrf, body: { current_password: "OwnerRestoredPass2026!", new_password: "OwnerPasswordRotated2026!", code: totp(ownerMfa.secret) } }), 200, "global password reset");
+await expectStatus(await call("/api/admin-data", { cookie: owner.cookie }), 401, "global password reset revokes Owner session");
+await expectStatus(await call("/api/admin-data", { cookie: recoveryLogin.cookie }), 401, "global password reset revokes other admin sessions");
+
+owner = await login("owner", "OwnerPasswordRotated2026!", totp(ownerMfa.secret));
+await expectStatus(owner, 200, "Owner can sign in after password rotation");
+await expectStatus(await call("/api/admin-revoke-all", { cookie: owner.cookie, csrf: owner.data.csrf, body: {} }), 200, "global emergency logout");
+await expectStatus(await call("/api/admin-data", { cookie: owner.cookie }), 401, "global emergency logout revokes current session");
+
+console.log("PASS: private route, MFA, recovery codes, individual admins, emergency Owner lock, recovery, Viewer RBAC, global password reset and global logout.");
