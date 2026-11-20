@@ -26,6 +26,7 @@ jobs:
           ADMIN_PASSWORD=TestOwnerPass2026!
           SESSION_SECRET=ci-session-secret-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
           OWNER_RECOVERY_SECRET=ci-owner-recovery-secret-0123456789
+          CRON_SECRET=ci-cron-secret-0123456789
           EOF
       - name: Apply local D1 migrations
         run: npm run db:migrate:local
@@ -46,6 +47,7 @@ jobs:
           TEST_ADMIN_PATH: /ci-private-admin-route
           TEST_OWNER_PASSWORD: TestOwnerPass2026!
           TEST_RECOVERY_SECRET: ci-owner-recovery-secret-0123456789
+          TEST_CRON_SECRET: ci-cron-secret-0123456789
         run: node tests/security-smoke.mjs
       - name: Show Worker log on failure
         if: failure()
