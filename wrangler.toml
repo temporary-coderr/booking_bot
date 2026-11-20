@@ -11,7 +11,7 @@ run_worker_first = true
 [[d1_databases]]
 binding = "DB"
 database_name = "routeadda-db"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "5b61d882-d6c9-4cc3-b96d-1a0b5017803e"
 migrations_dir = "migrations"
 
 [triggers]
