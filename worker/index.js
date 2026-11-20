@@ -1,3 +1,4 @@
+import { authenticate, handleSecurity } from "./security.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const COOKIE = "routeadda_admin";
 const now = () => Date.now();
@@ -188,6 +189,10 @@ async function createBooking(request, env) {
 async function adminApi(request, env, path, session) {
   const db = env.DB, method = request.method, d = await body(request);
   if (method !== "GET" && !await safeEqual(request.headers.get("x-csrf-token"), session.csrf)) return json({ ok: false, error: "Security token expired. Refresh the dashboard." }, 403);
+  if (session.role === "viewer" && method !== "GET") return json({ ok: false, error: "Viewer accounts have read-only access." }, 403);
+  const ownerOnlyPaths = ["/api/expiry-setting", "/api/receiver-add", "/api/receiver-delete", "/api/help-contact-add", "/api/help-contact-delete"];
+  if (ownerOnlyPaths.includes(path) && session.role !== "owner") return json({ ok: false, error: "Owner permission required." }, 403);
+  if ((path === "/api/report.csv" || path === "/api/report.xlsx") && session.role === "viewer") return json({ ok: false, error: "Owner or Admin permission required for exports." }, 403);
   if (method === "POST" && path === "/api/telegram-test") {
     if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return json({ ok: false, error: "Telegram is not configured on the server." }, 503);
     const sent = await sendTelegram("RouteADDA Telegram test successful. Your bot connection is working.", env);
@@ -243,7 +248,7 @@ async function adminApi(request, env, path, session) {
       db.prepare("SELECT da.*,b.reference,b.name,b.phone,b.origin,b.destination,b.trip_date,b.trip_time FROM driver_availability da JOIN bookings b ON b.id=da.booking_id ORDER BY da.created_at DESC").all()
     ]);
     const rows = bookings.results || [];
-    return json({ ok: true, csrf: session.csrf, bookings: rows, receivers: receivers.results || [], help_contacts: help.results || [], notified: notified?.n || 0, matches: findMatches(rows), expiry_hours: Number(settings?.value) || 12, driver_availability: availability.results || [] });
+    return json({ ok: true, csrf: session.csrf, admin: { username: session.username, display_name: session.displayName, role: session.role }, bookings: rows, receivers: receivers.results || [], help_contacts: help.results || [], notified: notified?.n || 0, matches: findMatches(rows), expiry_hours: Number(settings?.value) || 12, driver_availability: availability.results || [] });
   }
   if (method === "POST" && path === "/api/booking-update") {
     const fields = ["name","phone","origin","destination","via","trip_date","trip_time","role","vehicle_type","capacity_kg","passenger_count"];
@@ -339,33 +344,42 @@ async function adminApi(request, env, path, session) {
 export default {
  async fetch(request, env) {
   const url = new URL(request.url), path = url.pathname;
+  const harden = response => {
+   const headers = new Headers(response.headers);
+   headers.set("X-Content-Type-Options","nosniff");
+   headers.set("X-Frame-Options","DENY");
+   headers.set("Referrer-Policy","no-referrer");
+   headers.set("Permissions-Policy","camera=(), microphone=(), geolocation=()");
+   headers.set("Content-Security-Policy","default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+   if(path.startsWith("/api/") || path === String(env.ADMIN_PATH || "")) headers.set("Cache-Control","no-store");
+   return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+  };
   try {
-   if (path.startsWith("/control/")) { const token = path.split("/")[2] || ""; return Response.redirect(new URL("/admin.html?token=" + encodeURIComponent(token), url), 302); }
-   if (!path.startsWith("/api/")) return env.ASSETS.fetch(request);
-   if (path === "/api/public-config" && request.method === "GET") { const [receivers,help] = await Promise.all([env.DB.prepare("SELECT id,label,phone FROM receivers ORDER BY created_at").all(),env.DB.prepare("SELECT id,label,phone FROM help_contacts ORDER BY created_at").all()]); return json({ok:true,receivers:receivers.results||[],help_contacts:help.results||[]}); }
-   if (path === "/api/bookings" && request.method === "POST") return await createBooking(request, env);
-   if (path === "/api/booking-edit") return json({ok:false,error:"Public booking edits are disabled. Please contact an administrator on WhatsApp."},403);
-   if (path === "/api/whatsapp-click" && request.method === "POST") { const d=await body(request); await activity(env.DB,clean(d.reference,20),"whatsapp_link_opened"); return json({ok:true}); }
-   if (path === "/api/login" && request.method === "POST") {
-    const d=await body(request); if (!env.ADMIN_PASSWORD || !env.ADMIN_URL_TOKEN || !env.SESSION_SECRET) return json({ok:false,error:"Admin security is not configured."},503);
-    if (!await safeEqual(d.token,env.ADMIN_URL_TOKEN)) return json({ok:false,error:"Not found."},404);
-    if (!await safeEqual(d.password,env.ADMIN_PASSWORD)) return json({ok:false,error:"Incorrect password."},401);
-    const csrf=b64(crypto.getRandomValues(new Uint8Array(32))), value=await sessionCookie(csrf,env);
-    return json({ok:true,csrf},200,{"set-cookie":cookieHeader(value)});
+   const adminPath = String(env.ADMIN_PATH || "");
+   if (adminPath && adminPath.startsWith("/") && !adminPath.includes("?") && !adminPath.includes("#") && path === adminPath) {
+    if(request.method !== "GET") return harden(new Response("Method not allowed.",{status:405}));
+    const assetRequest = new Request(new URL("/admin.html",url).toString(),{method:"GET",headers:request.headers});
+    return harden(await env.ASSETS.fetch(assetRequest));
    }
-   if (path === "/api/logout" && request.method === "POST") return json({ok:true},200,{"set-cookie":cookieHeader("",0)});
-   if (path === "/api/match-check" && request.method === "POST") {
-    if (!env.CRON_SECRET || !await safeEqual(request.headers.get("x-cron-secret"),env.CRON_SECRET)) return json({ok:false},404);
-    const expired=await expireBookings(env.DB), result=await env.DB.prepare("SELECT * FROM bookings WHERE active=1").all(), matches=findMatches(result.results||[]); let notified=0;
-    for (const m of matches) { const pair=[m.a.reference,m.b.reference].sort().join(":"); const known=await env.DB.prepare("SELECT pair FROM notifications WHERE pair=?").bind(pair).first(); if(known) continue;
-     const ok=await sendTelegram("POSSIBLE DRIVER / CUSTOMER MATCH\n\n"+summary(m.a)+"\n\n"+summary(m.b)+"\n\nMatch: "+m.reason+"\nAdmin: review manually. No customer phone numbers included.",env);
-     if(ok){await env.DB.prepare("INSERT OR IGNORE INTO notifications(pair,created_at) VALUES(?,?)").bind(pair,new Date().toISOString()).run();notified++;}
-    }
-    return json({ok:true,expired,matched_pairs_notified:notified});
+   if (path === "/admin.html" || path === "/control" || path.startsWith("/control/")) return harden(new Response("Not found.",{status:404}));
+   if (!path.startsWith("/api/")) return harden(await env.ASSETS.fetch(request));
+   if (path === "/api/public-config" && request.method === "GET") {
+    const [receivers,help] = await Promise.all([env.DB.prepare("SELECT id,label,phone FROM receivers ORDER BY created_at").all(),env.DB.prepare("SELECT id,label,phone FROM help_contacts ORDER BY created_at").all()]);
+    return harden(json({ok:true,receivers:receivers.results||[],help_contacts:help.results||[]}));
    }
-   const session=await readSession(request,env); if(!session) return json({ok:false,error:"Please sign in again."},401);
-   return await adminApi(request,env,path,session);
-  } catch (error) { console.error("RouteADDA Worker error",error); return json({ok:false,error:"Server error. Please try again."},500); }
+   if (path === "/api/bookings" && request.method === "POST") return harden(await createBooking(request, env));
+   if (path === "/api/booking-edit") return harden(json({ok:false,error:"Public booking edits are disabled. Please contact an administrator on WhatsApp."},403));
+   if (path === "/api/whatsapp-click" && request.method === "POST") { const d=await body(request); await activity(env.DB,clean(d.reference,20),"whatsapp_link_opened"); return harden(json({ok:true})); }
+   const session = await authenticate(request,env);
+   const securityResponse = await handleSecurity(request,env,path,session);
+   if (securityResponse) return harden(securityResponse);
+   if (!session) return harden(json({ok:false,error:"Please sign in again."},401));
+   if (request.method !== "GET" && request.headers.get("origin") && new URL(request.headers.get("origin")).host !== url.host) return harden(json({ok:false,error:"Request origin rejected."},403));
+   return harden(await adminApi(request,env,path,session));
+  } catch (error) {
+   console.error("RouteADDA Worker error",String(error?.message || "unknown"));
+   return harden(json({ok:false,error:"Server error. Please try again."},500));
+  }
  },
  async scheduled(controller, env, ctx) {
   ctx.waitUntil((async()=>{ const expired=await expireBookings(env.DB), r=await env.DB.prepare("SELECT * FROM bookings WHERE active=1").all(), matches=findMatches(r.results||[]);
