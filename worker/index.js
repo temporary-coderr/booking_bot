@@ -408,6 +408,21 @@ export default {
     return harden(json({ok:true,receivers:receivers.results||[],help_contacts:help.results||[]}));
    }
    if (path === "/api/bookings" && request.method === "POST") { if (!sameOriginRequest(request)) return harden(json({ok:false,error:"Request origin rejected."},403)); if (!await rateLimit(env.DB,request,"public-booking",10,15*60*1000)) return harden(json({ok:false,error:"Too many booking requests. Please wait and try again."},429)); return harden(await createBooking(request, env)); }
+   if (path === "/api/match-check" && request.method === "POST") {
+    if (!env.CRON_SECRET || !await safeEqual(request.headers.get("x-cron-secret"),env.CRON_SECRET)) return harden(json({ok:false},404));
+    const expired = await expireBookings(env.DB);
+    const result = await env.DB.prepare("SELECT * FROM bookings WHERE active=1").all();
+    const matches = findMatches(result.results || []);
+    let notified = 0;
+    for (const match of matches) {
+      const pair = [match.a.reference,match.b.reference].sort().join(":");
+      const known = await env.DB.prepare("SELECT pair FROM notifications WHERE pair=?").bind(pair).first();
+      if (known) continue;
+      const sent = await sendTelegram("POSSIBLE DRIVER / CUSTOMER MATCH\\n\\n"+summary(match.a)+"\\n\\n"+summary(match.b)+"\\n\\nMatch: "+match.reason+"\\nAdmin: review manually. No customer phone numbers included.",env);
+      if (sent) { await env.DB.prepare("INSERT OR IGNORE INTO notifications(pair,created_at) VALUES(?,?)").bind(pair,new Date().toISOString()).run(); notified++; }
+    }
+    return harden(json({ok:true,expired,matched_pairs_notified:notified}));
+   }
    if (path === "/api/booking-edit") return harden(json({ok:false,error:"Public booking edits are disabled. Please contact an administrator on WhatsApp."},403));
    if (path === "/api/whatsapp-click" && request.method === "POST") { if (!sameOriginRequest(request)) return harden(json({ok:false,error:"Request origin rejected."},403)); if (!await rateLimit(env.DB,request,"whatsapp-click",50,5*60*1000)) return harden(json({ok:false,error:"Too many requests."},429)); const d=await body(request); if(d.__invalid_body)return harden(json({ok:false,error:"Request body is too large."},413)); await activity(env.DB,clean(d.reference,20),"whatsapp_link_opened"); return harden(json({ok:true})); }
    const session = await authenticate(request,env);
