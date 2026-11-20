@@ -193,10 +193,11 @@ async function adminApi(request, env, path, session) {
   const ownerOnlyPaths = ["/api/expiry-setting", "/api/receiver-add", "/api/receiver-delete", "/api/help-contact-add", "/api/help-contact-delete"];
   if (ownerOnlyPaths.includes(path) && session.role !== "owner") return json({ ok: false, error: "Owner permission required." }, 403);
   if ((path === "/api/report.csv" || path === "/api/report.xlsx") && session.role === "viewer") return json({ ok: false, error: "Owner or Admin permission required for exports." }, 403);
+  const auditSecurity = (event, target = "", metadata = {}) => db.prepare("INSERT INTO security_audit(actor_id,event,target_id,metadata_json,created_at) VALUES(?,?,?,?,?)").bind(session.adminId,event,target,JSON.stringify(metadata),new Date().toISOString()).run();
   if (method === "POST" && path === "/api/telegram-test") {
     if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return json({ ok: false, error: "Telegram is not configured on the server." }, 503);
     const sent = await sendTelegram("RouteADDA Telegram test successful. Your bot connection is working.", env);
-    await activity(db, "", sent ? "telegram_test_sent" : "telegram_test_failed");
+    await activity(db, "", sent ? "telegram_test_sent" : "telegram_test_failed"); await auditSecurity(sent ? "telegram_test_sent" : "telegram_test_failed");
     if (!sent) return json({ ok: false, error: "Telegram rejected the test message. Check the server-side bot token and chat ID." }, 502);
     return json({ ok: true, message: "Test message sent to the configured Telegram chat." });
   }
@@ -216,7 +217,7 @@ async function adminApi(request, env, path, session) {
         notified++;
       } else failed++;
     }
-    await activity(db, "", "admin_match_check");
+    await activity(db, "", "admin_match_check"); await auditSecurity("admin_match_check","",{notified,failed});
     return json({ ok: true, expired, total_possible_matches: matches.length, matched_pairs_notified: notified, already_notified: skipped, failed });
   }
   if (method === "GET" && path === "/api/activity-history") {
@@ -256,7 +257,7 @@ async function adminApi(request, env, path, session) {
     if (!d.id || !sets.length) return json({ ok: false, error: "No booking changes supplied." }, 400);
     values.push(d.id); const r = await db.prepare("UPDATE bookings SET " + sets.join(",") + " WHERE id=?").bind(...values).run();
     if (!r.meta?.changes) return json({ ok: false, error: "Booking not found." }, 404);
-    await activity(db, d.reference || "", "admin_edited"); return json({ ok: true, booking: { updated: true } });
+    await activity(db, d.reference || "", "admin_edited"); await auditSecurity("booking_edited",d.reference||""); return json({ ok: true, booking: { updated: true } });
   }
   if (method === "POST" && path === "/api/booking-status") {
     const allowed = ["pending","approved","rejected","completed","cancelled","closed","expired"];
@@ -269,28 +270,28 @@ async function adminApi(request, env, path, session) {
     else if (statusValue) await db.prepare("UPDATE bookings SET status=? WHERE id=?").bind(statusValue, d.id).run();
     else if (activeValue !== undefined) await db.prepare("UPDATE bookings SET active=? WHERE id=?").bind(activeValue, d.id).run();
     else return json({ ok: false, error: "No status change supplied." }, 400);
-    return json({ ok: true, booking: { updated: true } });
+    await auditSecurity("booking_status_changed",d.id||"",{status:statusValue||"",active:activeValue}); return json({ ok: true, booking: { updated: true } });
   }
   if (method === "POST" && path === "/api/booking-delete") {
-    await db.prepare("DELETE FROM bookings WHERE id=?").bind(d.id).run(); await activity(db, d.reference || "", "admin_deleted"); return json({ ok: true });
+    await db.prepare("DELETE FROM bookings WHERE id=?").bind(d.id).run(); await activity(db, d.reference || "", "admin_deleted"); await auditSecurity("booking_deleted",d.reference||""); return json({ ok: true });
   }
   if (method === "POST" && path === "/api/expiry-setting") {
     const hours = Number(d.hours); if (![6,12,24].includes(hours)) return json({ ok: false, error: "Choose 6, 12 or 24 hours." }, 400);
-    await db.prepare("INSERT INTO settings(key,value) VALUES('expiry_hours',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(String(hours)).run(); return json({ ok: true, expiry_hours: hours });
+    await db.prepare("INSERT INTO settings(key,value) VALUES('expiry_hours',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(String(hours)).run(); await auditSecurity("expiry_setting_changed","",{hours}); return json({ ok: true, expiry_hours: hours });
   }
   if (method === "POST" && path === "/api/receiver-add") {
     const label = clean(d.label,50), phone = digits(d.phone); if (!label || phone.length < 10) return json({ ok: false, error: "Enter a label and valid number including country code." }, 400);
-    const id = crypto.randomUUID(); await db.prepare("INSERT INTO receivers(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); return json({ ok: true, receiver: { id,label,phone } });
+    const id = crypto.randomUUID(); await db.prepare("INSERT INTO receivers(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); await auditSecurity("whatsapp_receiver_added",id,{label}); return json({ ok: true, receiver: { id,label,phone } });
   }
-  if (method === "POST" && path === "/api/receiver-delete") { await db.prepare("DELETE FROM receivers WHERE id=?").bind(d.id).run(); return json({ ok: true }); }
+  if (method === "POST" && path === "/api/receiver-delete") { await db.prepare("DELETE FROM receivers WHERE id=?").bind(d.id).run(); await auditSecurity("whatsapp_receiver_deleted",d.id||""); return json({ ok: true }); }
   if (method === "POST" && path === "/api/help-contact-add") {
     const phone = digits(d.phone); if (phone.length < 10) return json({ ok:false,error:"Enter a valid WhatsApp number including country code." },400);
     const existing = await db.prepare("SELECT label FROM help_contacts").all(); const labels = new Set((existing.results||[]).map(x=>x.label)); if (labels.size >= 5) return json({ ok:false,error:"You can configure up to 5 help contacts." },409);
-    let number=1; while(labels.has("Contact Admin "+number)) number++; const id=crypto.randomUUID(), label="Contact Admin "+number; await db.prepare("INSERT INTO help_contacts(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); return json({ ok:true,contact:{id,label,phone} });
+    let number=1; while(labels.has("Contact Admin "+number)) number++; const id=crypto.randomUUID(), label="Contact Admin "+number; await db.prepare("INSERT INTO help_contacts(id,label,phone,created_at) VALUES(?,?,?,?)").bind(id,label,phone,new Date().toISOString()).run(); await auditSecurity("help_contact_added",id,{label}); return json({ ok:true,contact:{id,label,phone} });
   }
-  if (method === "POST" && path === "/api/help-contact-delete") { await db.prepare("DELETE FROM help_contacts WHERE id=?").bind(d.id).run(); return json({ok:true}); }
+  if (method === "POST" && path === "/api/help-contact-delete") { await db.prepare("DELETE FROM help_contacts WHERE id=?").bind(d.id).run(); await auditSecurity("help_contact_deleted",d.id||""); return json({ok:true}); }
   if (method === "GET" && path === "/api/report.xlsx") {
-    const rows = await db.prepare("SELECT b.*, da.available_locations FROM bookings b LEFT JOIN driver_availability da ON da.booking_id = b.id").all();
+    await auditSecurity("booking_export_xlsx"); const rows = await db.prepare("SELECT b.*, da.available_locations FROM bookings b LEFT JOIN driver_availability da ON da.booking_id = b.id").all();
     const keys = ["id","reference","role","name","phone","origin","destination","via","trip_date","trip_time","created_at","active","status","vehicle_type","capacity_kg","passenger_count","available_locations"];
     const labels = ["Booking ID","Reference","Role","Name","Mobile Number","Origin","Destination","Via","Travel Date","Travel Time","Submitted At","Active","Status","Vehicle","Capacity (kg)","Passengers","Additional Availability"];
     const escXml = value => String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
@@ -334,7 +335,7 @@ async function adminApi(request, env, path, session) {
     return new Response(output,{headers:{"content-type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","content-disposition":'attachment; filename="routeadda-bookings.xlsx"',"cache-control":"no-store"}});
   }
   if (method === "GET" && path === "/api/report.csv") {
-    const rows = await db.prepare("SELECT b.*, da.available_locations FROM bookings b LEFT JOIN driver_availability da ON da.booking_id=b.id ORDER BY b.trip_date,b.trip_time").all();
+    await auditSecurity("booking_export_csv"); const rows = await db.prepare("SELECT b.*, da.available_locations FROM bookings b LEFT JOIN driver_availability da ON da.booking_id=b.id ORDER BY b.trip_date,b.trip_time").all();
     const keys = ["id","reference","role","name","phone","origin","destination","via","trip_date","trip_time","created_at","active","status","vehicle_type","capacity_kg","passenger_count","available_locations"];
     const csv = [keys.join(","),...(rows.results||[]).map(r=>keys.map(k=>'"'+String(r[k]??"").replace(/"/g,'""')+'"').join(","))].join("\r\n");
     return new Response(csv,{headers:{"content-type":"text/csv; charset=utf-8","content-disposition":'attachment; filename="routeadda-bookings.csv"',"cache-control":"no-store"}});
