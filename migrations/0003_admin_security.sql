@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   token_hash TEXT NOT NULL UNIQUE,
   csrf_token TEXT NOT NULL,
   ip_hash TEXT NOT NULL DEFAULT '',
+  ip_masked TEXT NOT NULL DEFAULT 'hidden',
   user_agent TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   last_seen_at TEXT NOT NULL,
