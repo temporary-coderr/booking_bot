@@ -73,7 +73,7 @@ let ownerData = await call("/api/admin-data", { cookie: owner.cookie });
 await expectStatus(ownerData, 200, "Owner dashboard");
 assert.equal(ownerData.data.admin.role, "owner", "Owner role must be returned");
 
-await expectStatus(await call("/api/admin-create", { cookie: owner.cookie, csrf: owner.data.csrf, body: { username: "helperadmin", display_name: "Helper Admin", role: "admin", password: "HelperAdminPass2026!" } }), 200, "Owner creates individual Admin");
+await expectStatus(await call("/api/admin-create", { cookie: owner.cookie, csrf: owner.data.csrf, body: { username: "helperadmin", display_name: "Helper Admin", role: "admin", password: "HelperAdminPass2026!", code: totp(ownerMfa.secret) } }), 200, "Owner creates individual Admin");
 let admin = await login("helperadmin", "HelperAdminPass2026!");
 await expectStatus(admin, 200, "Admin first login");
 assert.equal(admin.data.mfaRequired, true, "new Admin must enrol MFA");
@@ -119,7 +119,7 @@ await expectStatus(await call("/api/admin-data", { cookie: recoveryLogin.cookie 
 
 owner = await login("owner", "OwnerPasswordRotated2026!", totp(ownerMfa.secret));
 await expectStatus(owner, 200, "Owner can sign in after password rotation");
-await expectStatus(await call("/api/admin-revoke-all", { cookie: owner.cookie, csrf: owner.data.csrf, body: {} }), 200, "global emergency logout");
+await expectStatus(await call("/api/admin-revoke-all", { cookie: owner.cookie, csrf: owner.data.csrf, body: { code: totp(ownerMfa.secret) } }), 200, "global emergency logout");
 await expectStatus(await call("/api/admin-data", { cookie: owner.cookie }), 401, "global emergency logout revokes current session");
 
 console.log("PASS: private route, MFA, recovery codes, individual admins, emergency Owner lock, recovery, Viewer RBAC, global password reset and global logout.");
