@@ -189,7 +189,7 @@ async function createBooking(request, env) {
   if (role === "driver" && d.additional_availability === true) await db.prepare("INSERT INTO driver_availability(booking_id,available_locations,created_at) VALUES(?,?,?)").bind(id, clean(d.available_locations, 500), created).run();
   await activity(db, reference, "booking_created");
   const receivers = await db.prepare("SELECT id,label,phone FROM receivers ORDER BY created_at").all();
-  const message = "Yahan booking hai\nBooking type: " + role.toUpperCase() + "\nName: " + b.name + "\nMobile: " + b.phone + "\nRoute: " + b.origin + " → " + b.destination + (b.via ? " via " + b.via : "") + "\nDate & time: " + b.trip_date + " | " + b.trip_time + (b.vehicle_type ? "\nVehicle: " + b.vehicle_type : "") + (b.capacity_kg ? "\nCapacity: " + b.capacity_kg + " kg" : "") + (b.passenger_count ? "\nPassengers: " + b.passenger_count : "") + "\nBooking ID: " + reference;
+  const message = "Yahan booking hai\nBooking type: " + role.toUpperCase() + "\nRoute: " + b.origin + " → " + b.destination + (b.via ? " via " + b.via : "") + "\nDate & time: " + b.trip_date + " | " + b.trip_time + (b.vehicle_type ? "\nVehicle: " + b.vehicle_type : "") + (b.capacity_kg ? "\nCapacity: " + b.capacity_kg + " kg" : "") + (b.passenger_count ? "\nPassengers: " + b.passenger_count : "") + "\nBooking ID: " + reference;
   const links = (receivers.results || []).map(x => ({ id: x.id, label: x.label, url: "https://wa.me/" + digits(x.phone) + "?text=" + encodeURIComponent(message) }));
   return json({ ok: true, reference, whatsapp_links: links, message: "Booking saved. Share it with the admin on WhatsApp." }, 201);
 }
