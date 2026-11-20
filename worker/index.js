@@ -256,7 +256,11 @@ async function adminApi(request, env, path, session) {
       db.prepare("SELECT da.*,b.reference,b.name,b.phone,b.origin,b.destination,b.trip_date,b.trip_time FROM driver_availability da JOIN bookings b ON b.id=da.booking_id ORDER BY da.created_at DESC").all()
     ]);
     const rows = bookings.results || [];
-    return json({ ok: true, csrf: session.csrf, admin: { username: session.username, display_name: session.displayName, role: session.role }, bookings: rows, receivers: receivers.results || [], help_contacts: help.results || [], notified: notified?.n || 0, matches: findMatches(rows), expiry_hours: Number(settings?.value) || 12, driver_availability: availability.results || [] });
+    const isViewer = session.role === "viewer";
+    const maskPhone = value => { const n = digits(value); return n.length > 4 ? "••••••" + n.slice(-4) : "••••"; };
+    const visibleBookings = isViewer ? rows.map(row => ({ ...row, phone: maskPhone(row.phone) })) : rows;
+    const visibleAvailability = isViewer ? (availability.results || []).map(row => ({ ...row, phone: maskPhone(row.phone) })) : (availability.results || []);
+    return json({ ok: true, csrf: session.csrf, admin: { username: session.username, display_name: session.displayName, role: session.role }, bookings: visibleBookings, receivers: isViewer ? [] : (receivers.results || []), help_contacts: isViewer ? [] : (help.results || []), notified: notified?.n || 0, matches: isViewer ? [] : findMatches(rows), expiry_hours: Number(settings?.value) || 12, driver_availability: visibleAvailability });
   }
   if (method === "POST" && path === "/api/booking-update") {
     const fields = ["name","phone","origin","destination","via","trip_date","trip_time","role","vehicle_type","capacity_kg","passenger_count"];
