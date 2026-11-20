@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "wrangler dev --local",
     "db:migrate:local": "wrangler d1 migrations apply routeadda-db --local",
-    "check": "node --check worker/index.js && node --check worker/security.js && node --check public/app.js && node --check public/admin.js",
+    "check": "node --check worker/index.js && node --check worker/security.js && node --check public/app.js && node --check public/admin.js && node --check tests/security-smoke.mjs",
     "test:security": "node tests/security-smoke.mjs"
   },
   "devDependencies": {
