@@ -95,7 +95,7 @@ ownerMfa = await enrolMfa(owner.cookie, owner.data.csrf);
 ownerData = await call("/api/admin-data", { cookie: owner.cookie });
 await expectStatus(ownerData, 200, "recovered Owner dashboard");
 
-await expectStatus(await call("/api/admin-create", { cookie: owner.cookie, csrf: owner.data.csrf, body: { username: "readonly", display_name: "Read Only", role: "viewer", password: "ReadOnlyPass2026!" } }), 200, "Owner creates Viewer");
+await expectStatus(await call("/api/admin-create", { cookie: owner.cookie, csrf: owner.data.csrf, body: { username: "readonly", display_name: "Read Only", role: "viewer", password: "ReadOnlyPass2026!", code: totp(ownerMfa.secret) } }), 200, "Owner creates Viewer");
 let viewer = await login("readonly", "ReadOnlyPass2026!");
 await expectStatus(viewer, 200, "Viewer first login");
 assert.equal(viewer.data.mfaRequired, true, "Viewer must also enrol MFA");
