@@ -371,7 +371,7 @@ export default {
   };
   try {
    const adminPath = String(env.ADMIN_PATH || "");
-   if (adminPath && adminPath.startsWith("/") && !adminPath.includes("?") && !adminPath.includes("#") && path === adminPath) {
+   if (/^\/[A-Za-z0-9_-]{20,100}$/.test(adminPath) && path === adminPath) {
     if(request.method !== "GET") return harden(new Response("Method not allowed.",{status:405}));
     const assetRequest = new Request(new URL("/admin.html",url).toString(),{method:"GET",headers:request.headers});
     return harden(await env.ASSETS.fetch(assetRequest));
@@ -390,7 +390,7 @@ export default {
    const securityResponse = await handleSecurity(request,env,path,session);
    if (securityResponse) return harden(securityResponse);
    if (!session) return harden(json({ok:false,error:"Please sign in again."},401));
-   if (request.method !== "GET" && request.headers.get("origin") && new URL(request.headers.get("origin")).host !== url.host) return harden(json({ok:false,error:"Request origin rejected."},403));
+   if (request.method !== "GET" && !sameOriginRequest(request)) return harden(json({ok:false,error:"Request origin rejected."},403));
    return harden(await adminApi(request,env,path,session));
   } catch (error) {
    console.error("RouteADDA Worker error",String(error?.message || "unknown"));
