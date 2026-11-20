@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 
 const BASE = process.env.TEST_BASE_URL || "http://127.0.0.1:8787";
 const ADMIN_PATH = process.env.TEST_ADMIN_PATH || "/ci-private-admin-route";
+const OWNER_USERNAME = (process.env.TEST_OWNER_USERNAME || "owner").trim().toLowerCase();
 const OWNER_PASSWORD = process.env.TEST_OWNER_PASSWORD || "TestOwnerPass2026!";
 const RECOVERY_SECRET = process.env.TEST_RECOVERY_SECRET || "ci-owner-recovery-secret-0123456789";
 const CRON_SECRET = process.env.TEST_CRON_SECRET || "ci-cron-secret-0123456789";
@@ -55,7 +56,7 @@ async function expectStatus(result, status, label) {
 const dateParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("-");
 const tomorrow = new Date(Date.UTC(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]) + 1));
 const tripDate = tomorrow.getUTCFullYear()+"-"+String(tomorrow.getUTCMonth()+1).padStart(2,"0")+"-"+String(tomorrow.getUTCDate()).padStart(2,"0");
-const publicBooking = await call("/api/bookings", { body: { role: "customer", name: "CI Privacy Test", phone: "919876543210", origin: "Jaora", destination: "Indore", trip_date: tripDate, trip_time: "23:59" } });
+const publicBooking = await call("/api/bookings", { body: { role: "customer", name: "CI Privacy Test", phone: "919" + String(Date.now()).slice(-10), origin: "Jaora", destination: "Indore", trip_date: tripDate, trip_time: "23:59" } });
 await expectStatus(publicBooking, 201, "public booking creation");
 await expectStatus(await call("/api/match-check", { body: {}, headers: { "x-cron-secret": CRON_SECRET } }), 200, "existing cron match-check endpoint");
 await expectStatus(await call("/api/match-check", { body: {}, headers: { "x-cron-secret": "wrong-secret" } }), 404, "cron endpoint rejects an incorrect secret");
@@ -63,9 +64,9 @@ const privatePage = await call(ADMIN_PATH);
 await expectStatus(privatePage, 200, "private admin route");
 assert.match(privatePage.text, /Administrator sign in/, "private route should serve admin login");
 await expectStatus(await call("/admin.html"), 404, "direct admin HTML must be blocked");
-await expectStatus(await call("/api/login", { body: { username: "owner", password: OWNER_PASSWORD }, headers: { origin: "https://attacker.invalid" } }), 403, "cross-origin login must be rejected");
+await expectStatus(await call("/api/login", { body: { username: OWNER_USERNAME, password: OWNER_PASSWORD }, headers: { origin: "https://attacker.invalid" } }), 403, "cross-origin login must be rejected");
 
-let owner = await login("owner", OWNER_PASSWORD);
+let owner = await login(OWNER_USERNAME, OWNER_PASSWORD);
 await expectStatus(owner, 200, "initial Owner login");
 assert.equal(owner.data.mfaRequired, true, "first login must require MFA enrolment");
 let ownerMfa = await enrolMfa(owner.cookie, owner.data.csrf);
@@ -84,11 +85,11 @@ assert.ok(adminOverview.data.sessions.length >= 2, "Owner and Admin sessions sho
 await expectStatus(await call("/api/admin-create", { cookie: admin.cookie, csrf: admin.data.csrf, body: { username: "badadmin", display_name: "Bad", role: "admin", password: "BadAdminPass2026!" } }), 403, "Admin cannot create another admin");
 
 await expectStatus(await call("/api/admin-lock-owner", { cookie: admin.cookie, csrf: admin.data.csrf, body: { code: totp(adminMfa.secret) } }), 200, "trusted Admin can emergency-lock Owner");
-await expectStatus(await login("owner", OWNER_PASSWORD), 401, "locked Owner cannot log in");
-await expectStatus(await call("/api/owner-recovery", { body: { username: "owner", recovery_secret: RECOVERY_SECRET, new_password: "OwnerRestoredPass2026!" } }), 200, "Owner emergency recovery");
+await expectStatus(await login(OWNER_USERNAME, OWNER_PASSWORD), 401, "locked Owner cannot log in");
+await expectStatus(await call("/api/owner-recovery", { body: { username: OWNER_USERNAME, recovery_secret: RECOVERY_SECRET, new_password: "OwnerRestoredPass2026!" } }), 200, "Owner emergency recovery");
 await expectStatus(await call("/api/admin-data", { cookie: admin.cookie }), 401, "Owner recovery revokes every existing session");
 
-owner = await login("owner", "OwnerRestoredPass2026!");
+owner = await login(OWNER_USERNAME, "OwnerRestoredPass2026!");
 await expectStatus(owner, 200, "Owner can sign in after recovery");
 assert.equal(owner.data.mfaRequired, true, "Owner recovery must force MFA re-enrolment");
 ownerMfa = await enrolMfa(owner.cookie, owner.data.csrf);
@@ -107,17 +108,17 @@ await expectStatus(await call("/api/security-overview", { cookie: viewer.cookie 
 assert.ok(viewerData.data.bookings.every(b => !String(b.phone).endsWith("3210") || String(b.phone).startsWith("••")), "Viewer must not receive raw customer phone numbers");
 
 await expectStatus(await call("/api/logout", { cookie: owner.cookie, csrf: owner.data.csrf, body: {} }), 200, "Owner logout");
-const recoveryLogin = await login("owner", "OwnerRestoredPass2026!", "", ownerMfa.codes[0]);
+const recoveryLogin = await login(OWNER_USERNAME, "OwnerRestoredPass2026!", "", ownerMfa.codes[0]);
 await expectStatus(recoveryLogin, 200, "one-time recovery code login");
-await expectStatus(await login("owner", "OwnerRestoredPass2026!", "", ownerMfa.codes[0]), 401, "recovery code cannot be reused");
+await expectStatus(await login(OWNER_USERNAME, "OwnerRestoredPass2026!", "", ownerMfa.codes[0]), 401, "recovery code cannot be reused");
 
-owner = await login("owner", "OwnerRestoredPass2026!", totp(ownerMfa.secret));
+owner = await login(OWNER_USERNAME, "OwnerRestoredPass2026!", totp(ownerMfa.secret));
 await expectStatus(owner, 200, "Owner MFA login");
 await expectStatus(await call("/api/password-change", { cookie: owner.cookie, csrf: owner.data.csrf, body: { current_password: "OwnerRestoredPass2026!", new_password: "OwnerPasswordRotated2026!", code: totp(ownerMfa.secret) } }), 200, "global password reset");
 await expectStatus(await call("/api/admin-data", { cookie: owner.cookie }), 401, "global password reset revokes Owner session");
 await expectStatus(await call("/api/admin-data", { cookie: recoveryLogin.cookie }), 401, "global password reset revokes other admin sessions");
 
-owner = await login("owner", "OwnerPasswordRotated2026!", totp(ownerMfa.secret));
+owner = await login(OWNER_USERNAME, "OwnerPasswordRotated2026!", totp(ownerMfa.secret));
 await expectStatus(owner, 200, "Owner can sign in after password rotation");
 await expectStatus(await call("/api/admin-revoke-all", { cookie: owner.cookie, csrf: owner.data.csrf, body: { code: totp(ownerMfa.secret) } }), 200, "global emergency logout");
 await expectStatus(await call("/api/admin-data", { cookie: owner.cookie }), 401, "global emergency logout revokes current session");
