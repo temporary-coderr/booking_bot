@@ -31,7 +31,31 @@ async function readSession(request, env) {
   try { const data = JSON.parse(new TextDecoder().decode(fromB64(payload))); return data.admin && data.exp > now() ? data : null; } catch { return null; }
 }
 const cookieHeader = (value, maxAge = 28800) => COOKIE + "=" + value + "; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=" + maxAge;
-async function body(request) { try { return await request.json(); } catch { return {}; } }
+async function body(request) {
+  const length = Number(request.headers.get("content-length") || 0);
+  if (length > 16384) return { __invalid_body: true };
+  try { const raw = await request.text(); if (raw.length > 16384) return { __invalid_body: true }; return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+}
+async function rateLimit(db, request, label, maximum, windowMs) {
+  const ip = request.headers.get("cf-connecting-ip") || "unknown";
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(label + "|" + ip));
+  const key = b64(bytes), current = now();
+  const row = await db.prepare("SELECT request_count,window_started_at,blocked_until FROM api_rate_limits WHERE rate_key=?").bind(key).first();
+  if (row?.blocked_until && Date.parse(row.blocked_until) > current) return false;
+  if (!row || current - Date.parse(row.window_started_at) >= windowMs) {
+    await db.prepare("INSERT INTO api_rate_limits(rate_key,request_count,window_started_at,blocked_until) VALUES(?,1,?,NULL) ON CONFLICT(rate_key) DO UPDATE SET request_count=1,window_started_at=excluded.window_started_at,blocked_until=NULL").bind(key,new Date(current).toISOString()).run();
+    return true;
+  }
+  const count = Number(row.request_count || 0) + 1;
+  const blocked = count > maximum ? new Date(current + windowMs).toISOString() : null;
+  await db.prepare("UPDATE api_rate_limits SET request_count=?,blocked_until=? WHERE rate_key=?").bind(count,blocked,key).run();
+  return count <= maximum;
+}
+function sameOriginRequest(request) {
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  try { return new URL(origin).host === new URL(request.url).host; } catch { return false; }
+}
 async function activity(db, reference, event) {
   await db.prepare("INSERT INTO activity(reference,event,created_at) VALUES(?,?,?)").bind(reference || "", event, new Date().toISOString()).run();
 }
@@ -167,7 +191,7 @@ async function sendTelegram(text, env) {
   return r.ok;
 }
 async function createBooking(request, env) {
-  const d = await body(request), role = clean(d.role, 12).toLowerCase();
+  const d = await body(request); if (d.__invalid_body) return json({ok:false,error:"Request body is too large."},413); const role = clean(d.role, 12).toLowerCase();
   const b = { role, name: clean(d.name, 80), phone: digits(d.phone), origin: clean(d.origin, 80), destination: clean(d.destination, 80), via: (Array.isArray(d.via) ? d.via : String(d.via || "").split(",")).map(x => clean(x, 80)).filter(Boolean).slice(0, 5).join(", "), trip_date: clean(d.trip_date, 10), trip_time: clean(d.trip_time, 5), vehicle_type: role === "driver" ? clean(d.vehicle_type, 20).toUpperCase() : "", capacity_kg: role === "driver" && ["TRUCK", "PICKUP"].includes(String(d.vehicle_type).toUpperCase()) ? String(Math.max(0, Number(d.capacity_kg) || 0)) : "", passenger_count: role === "driver" && String(d.vehicle_type).toUpperCase() === "CAR" ? String(Math.max(1, Math.min(20, Number(d.passenger_count) || 1))) : "" };
   if (!["driver", "customer"].includes(role) || !b.name || b.phone.length < 10 || !b.origin || !b.destination || b.origin.toLowerCase() === b.destination.toLowerCase()) return json({ ok: false, error: "Please complete all required details and check your mobile number." }, 400);
   if (role === "driver" && (!["TRUCK", "PICKUP", "CAR", "OTHER"].includes(b.vehicle_type) || (["TRUCK", "PICKUP"].includes(b.vehicle_type) && !Number(b.capacity_kg)) || (b.vehicle_type === "CAR" && !Number(b.passenger_count)))) return json({ ok: false, error: "Please complete the vehicle details." }, 400);
@@ -187,7 +211,7 @@ async function createBooking(request, env) {
   return json({ ok: true, reference, whatsapp_links: links, message: "Booking saved. Share it with the admin on WhatsApp." }, 201);
 }
 async function adminApi(request, env, path, session) {
-  const db = env.DB, method = request.method, d = await body(request);
+  const db = env.DB, method = request.method, d = await body(request);\n  if (d.__invalid_body) return json({ok:false,error:"Request body is too large."},413);
   if (method !== "GET" && !await safeEqual(request.headers.get("x-csrf-token"), session.csrf)) return json({ ok: false, error: "Security token expired. Refresh the dashboard." }, 403);
   if (session.role === "viewer" && method !== "GET") return json({ ok: false, error: "Viewer accounts have read-only access." }, 403);
   const ownerOnlyPaths = ["/api/expiry-setting", "/api/receiver-add", "/api/receiver-delete", "/api/help-contact-add", "/api/help-contact-delete"];
@@ -364,13 +388,13 @@ export default {
    }
    if (path === "/admin.html" || path === "/control" || path.startsWith("/control/")) return harden(new Response("Not found.",{status:404}));
    if (!path.startsWith("/api/")) return harden(await env.ASSETS.fetch(request));
-   if (path === "/api/public-config" && request.method === "GET") {
+   if (path === "/api/public-config" && request.method === "GET") {\n    if (!await rateLimit(env.DB,request,"public-config",90,60000)) return harden(json({ok:false,error:"Too many requests. Please try again shortly."},429));
     const [receivers,help] = await Promise.all([env.DB.prepare("SELECT id,label,phone FROM receivers ORDER BY created_at").all(),env.DB.prepare("SELECT id,label,phone FROM help_contacts ORDER BY created_at").all()]);
     return harden(json({ok:true,receivers:receivers.results||[],help_contacts:help.results||[]}));
    }
-   if (path === "/api/bookings" && request.method === "POST") return harden(await createBooking(request, env));
+   if (path === "/api/bookings" && request.method === "POST") { if (!sameOriginRequest(request)) return harden(json({ok:false,error:"Request origin rejected."},403)); if (!await rateLimit(env.DB,request,"public-booking",10,15*60*1000)) return harden(json({ok:false,error:"Too many booking requests. Please wait and try again."},429)); return harden(await createBooking(request, env)); }
    if (path === "/api/booking-edit") return harden(json({ok:false,error:"Public booking edits are disabled. Please contact an administrator on WhatsApp."},403));
-   if (path === "/api/whatsapp-click" && request.method === "POST") { const d=await body(request); await activity(env.DB,clean(d.reference,20),"whatsapp_link_opened"); return harden(json({ok:true})); }
+   if (path === "/api/whatsapp-click" && request.method === "POST") { if (!sameOriginRequest(request)) return harden(json({ok:false,error:"Request origin rejected."},403)); if (!await rateLimit(env.DB,request,"whatsapp-click",50,5*60*1000)) return harden(json({ok:false,error:"Too many requests."},429)); const d=await body(request); if(d.__invalid_body)return harden(json({ok:false,error:"Request body is too large."},413)); await activity(env.DB,clean(d.reference,20),"whatsapp_link_opened"); return harden(json({ok:true})); }
    const session = await authenticate(request,env);
    const securityResponse = await handleSecurity(request,env,path,session);
    if (securityResponse) return harden(securityResponse);
