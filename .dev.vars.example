@@ -1,7 +1,10 @@
-ADMIN_PASSWORD=change-this-local-password
-ADMIN_URL_TOKEN=local-admin-access-token
-SESSION_SECRET=replace-with-a-long-random-secret
-CRON_SECRET=local-cron-secret
-# Optional Telegram notifications for local testing:
-# TELEGRAM_BOT_TOKEN=
-# TELEGRAM_CHAT_ID=
+# Copy this file to .dev.vars and replace every placeholder with a unique secret.
+ADMIN_PATH=/private-admin-replace-with-a-long-random-path
+ADMIN_USERNAME=owner
+ADMIN_DISPLAY_NAME=RouteADDA Owner
+ADMIN_PASSWORD=ReplaceWithStrongInitialPassword2026!
+SESSION_SECRET=REPLACE_WITH_AT_LEAST_32_RANDOM_CHARACTERS
+OWNER_RECOVERY_SECRET=REPLACE_WITH_A_DIFFERENT_32_PLUS_CHARACTER_SECRET
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+CRON_SECRET=REPLACE_WITH_A_DIFFERENT_RANDOM_SECRET
