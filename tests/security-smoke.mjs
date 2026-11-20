@@ -5,6 +5,7 @@ const BASE = process.env.TEST_BASE_URL || "http://127.0.0.1:8787";
 const ADMIN_PATH = process.env.TEST_ADMIN_PATH || "/ci-private-admin-route";
 const OWNER_PASSWORD = process.env.TEST_OWNER_PASSWORD || "TestOwnerPass2026!";
 const RECOVERY_SECRET = process.env.TEST_RECOVERY_SECRET || "ci-owner-recovery-secret-0123456789";
+const CRON_SECRET = process.env.TEST_CRON_SECRET || "ci-cron-secret-0123456789";
 const ORIGIN = new URL(BASE).origin;
 
 async function call(path, options = {}) {
@@ -56,6 +57,8 @@ const tomorrow = new Date(Date.UTC(Number(dateParts[0]), Number(dateParts[1]) - 
 const tripDate = tomorrow.getUTCFullYear()+"-"+String(tomorrow.getUTCMonth()+1).padStart(2,"0")+"-"+String(tomorrow.getUTCDate()).padStart(2,"0");
 const publicBooking = await call("/api/bookings", { body: { role: "customer", name: "CI Privacy Test", phone: "919876543210", origin: "Jaora", destination: "Indore", trip_date: tripDate, trip_time: "23:59" } });
 await expectStatus(publicBooking, 201, "public booking creation");
+await expectStatus(await call("/api/match-check", { body: {}, headers: { "x-cron-secret": CRON_SECRET } }), 200, "existing cron match-check endpoint");
+await expectStatus(await call("/api/match-check", { body: {}, headers: { "x-cron-secret": "wrong-secret" } }), 404, "cron endpoint rejects an incorrect secret");
 const privatePage = await call(ADMIN_PATH);
 await expectStatus(privatePage, 200, "private admin route");
 assert.match(privatePage.text, /Administrator sign in/, "private route should serve admin login");
