@@ -16,7 +16,7 @@ async function safeEqual(a, b) {
 async function body(request) {
   const length = Number(request.headers.get("content-length") || 0);
   if (length > 16384) return { __invalid_body: true };
-  try { const raw = await request.text(); if (raw.length > 16384) return { __invalid_body: true }; return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+  try { const raw = await request.text(); if (raw.length > 16384) return { __invalid_body: true }; const parsed = raw ? JSON.parse(raw) : {}; return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; }
 }
 async function rateLimit(db, request, label, maximum, windowMs) {
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
