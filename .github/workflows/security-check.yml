@@ -1,0 +1,53 @@
+name: Cloudflare security checks
+
+on:
+  push:
+    branches: [cloudflare-migration]
+  pull_request:
+    branches: [cloudflare-migration]
+
+jobs:
+  security-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install
+      - name: Configure isolated test secrets
+        run: |
+          cat > .dev.vars <<'EOF'
+          ADMIN_PATH=/ci-private-admin-route
+          ADMIN_USERNAME=owner
+          ADMIN_DISPLAY_NAME=CI Owner
+          ADMIN_PASSWORD=TestOwnerPass2026!
+          SESSION_SECRET=ci-session-secret-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
+          OWNER_RECOVERY_SECRET=ci-owner-recovery-secret-0123456789
+          EOF
+      - name: Apply local D1 migrations
+        run: npm run db:migrate:local
+      - name: Syntax checks
+        run: npm run check
+      - name: Start local Worker
+        run: |
+          npm run dev -- --ip 127.0.0.1 --port 8787 > /tmp/routeadda-wrangler.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8787/api/public-config >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/routeadda-wrangler.log
+          exit 1
+      - name: Run security smoke tests
+        env:
+          TEST_BASE_URL: http://127.0.0.1:8787
+          TEST_ADMIN_PATH: /ci-private-admin-route
+          TEST_OWNER_PASSWORD: TestOwnerPass2026!
+          TEST_RECOVERY_SECRET: ci-owner-recovery-secret-0123456789
+        run: node tests/security-smoke.mjs
+      - name: Show Worker log on failure
+        if: failure()
+        run: cat /tmp/routeadda-wrangler.log
