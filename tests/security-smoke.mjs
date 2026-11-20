@@ -10,11 +10,12 @@ const ORIGIN = new URL(BASE).origin;
 async function call(path, options = {}) {
   const headers = { "content-type": "application/json", origin: ORIGIN, ...(options.cookie ? { cookie: options.cookie } : {}), ...(options.csrf ? { "x-csrf-token": options.csrf } : {}), ...(options.headers || {}) };
   const response = await fetch(BASE + path, { method: options.method || (options.body ? "POST" : "GET"), headers, ...(options.body ? { body: JSON.stringify(options.body) } : {}) });
+  const text = await response.text();
   let data = {};
-  try { data = await response.json(); } catch {}
+  try { data = JSON.parse(text); } catch {}
   const setCookie = response.headers.get("set-cookie") || "";
   const cookie = setCookie ? setCookie.split(";")[0] : options.cookie || "";
-  return { response, data, cookie };
+  return { response, data, cookie, text };
 }
 function decodeBase32(text) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -52,7 +53,7 @@ async function expectStatus(result, status, label) {
 
 const privatePage = await call(ADMIN_PATH);
 await expectStatus(privatePage, 200, "private admin route");
-assert.match(await privatePage.response.text(), /Administrator sign in/, "private route should serve admin login");
+assert.match(privatePage.text, /Administrator sign in/, "private route should serve admin login");
 await expectStatus(await call("/admin.html"), 404, "direct admin HTML must be blocked");
 await expectStatus(await call("/api/login", { body: { username: "owner", password: OWNER_PASSWORD }, headers: { origin: "https://attacker.invalid" } }), 403, "cross-origin login must be rejected");
 
