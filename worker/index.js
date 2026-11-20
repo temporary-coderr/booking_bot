@@ -211,7 +211,8 @@ async function createBooking(request, env) {
   return json({ ok: true, reference, whatsapp_links: links, message: "Booking saved. Share it with the admin on WhatsApp." }, 201);
 }
 async function adminApi(request, env, path, session) {
-  const db = env.DB, method = request.method, d = await body(request);\n  if (d.__invalid_body) return json({ok:false,error:"Request body is too large."},413);
+  const db = env.DB, method = request.method, d = await body(request);
+  if (d.__invalid_body) return json({ok:false,error:"Request body is too large."},413);
   if (method !== "GET" && !await safeEqual(request.headers.get("x-csrf-token"), session.csrf)) return json({ ok: false, error: "Security token expired. Refresh the dashboard." }, 403);
   if (session.role === "viewer" && method !== "GET") return json({ ok: false, error: "Viewer accounts have read-only access." }, 403);
   const ownerOnlyPaths = ["/api/expiry-setting", "/api/receiver-add", "/api/receiver-delete", "/api/help-contact-add", "/api/help-contact-delete"];
@@ -388,7 +389,8 @@ export default {
    }
    if (path === "/admin.html" || path === "/control" || path.startsWith("/control/")) return harden(new Response("Not found.",{status:404}));
    if (!path.startsWith("/api/")) return harden(await env.ASSETS.fetch(request));
-   if (path === "/api/public-config" && request.method === "GET") {\n    if (!await rateLimit(env.DB,request,"public-config",90,60000)) return harden(json({ok:false,error:"Too many requests. Please try again shortly."},429));
+   if (path === "/api/public-config" && request.method === "GET") {
+    if (!await rateLimit(env.DB,request,"public-config",90,60000)) return harden(json({ok:false,error:"Too many requests. Please try again shortly."},429));
     const [receivers,help] = await Promise.all([env.DB.prepare("SELECT id,label,phone FROM receivers ORDER BY created_at").all(),env.DB.prepare("SELECT id,label,phone FROM help_contacts ORDER BY created_at").all()]);
     return harden(json({ok:true,receivers:receivers.results||[],help_contacts:help.results||[]}));
    }
