@@ -296,6 +296,7 @@ async function adminApi(request, env, path, session) {
     const activeValue = typeof d.active === "boolean" ? (d.active ? 1 : 0) : undefined;
     const statusValue = d.status || null;
     if (!d.id) return json({ ok: false, error: "Booking ID is required." }, 400);
+    if (!await db.prepare("SELECT id FROM bookings WHERE id=?").bind(d.id).first()) return json({ok:false,error:"Booking not found."},404);
     if (statusValue && ["rejected","completed","cancelled","closed","expired"].includes(statusValue)) await db.prepare("UPDATE bookings SET status=?,active=0 WHERE id=?").bind(statusValue, d.id).run();
     else if (statusValue && activeValue !== undefined) await db.prepare("UPDATE bookings SET status=?,active=? WHERE id=?").bind(statusValue, activeValue, d.id).run();
     else if (statusValue) await db.prepare("UPDATE bookings SET status=? WHERE id=?").bind(statusValue, d.id).run();
