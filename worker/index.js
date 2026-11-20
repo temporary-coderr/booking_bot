@@ -1,6 +1,5 @@
 import { authenticate, handleSecurity } from "./security.js";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
-const COOKIE = "routeadda_admin";
 const now = () => Date.now();
 const indiaNow = () => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Kolkata', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hourCycle:'h23' }).formatToParts(new Date()).map(x=>[x.type,x.value])); return p.year+'-'+p.month+'-'+p.day+'T'+p.hour+':'+p.minute; };
 const clean = (v, n = 100) => String(v ?? "").replace(/[<>]/g, "").trim().replace(/\s+/g, " ").slice(0, n);
@@ -9,28 +8,11 @@ const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(b
 const terminal = new Set(["completed", "cancelled", "closed", "expired", "rejected"]);
 const active = b => Number(b.active) === 1 && !terminal.has(String(b.status).toLowerCase());
 const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const fromB64 = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
-async function hmac(value, env) {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.SESSION_SECRET || ""), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return b64(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
-}
 async function safeEqual(a, b) {
   const x = new TextEncoder().encode(String(a ?? "")), y = new TextEncoder().encode(String(b ?? ""));
   if (x.length !== y.length) return false;
   let diff = 0; for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i]; return diff === 0;
 }
-async function sessionCookie(csrf, env) {
-  const payload = b64(new TextEncoder().encode(JSON.stringify({ admin: true, exp: now() + 8 * 60 * 60 * 1000, csrf })));
-  return payload + "." + await hmac(payload, env);
-}
-async function readSession(request, env) {
-  const raw = (request.headers.get("cookie") || "").split(";").map(x => x.trim()).find(x => x.startsWith(COOKIE + "="))?.slice(COOKIE.length + 1);
-  if (!raw || !env.SESSION_SECRET) return null;
-  const [payload, signature] = raw.split(".");
-  if (!payload || !signature || !await safeEqual(signature, await hmac(payload, env))) return null;
-  try { const data = JSON.parse(new TextDecoder().decode(fromB64(payload))); return data.admin && data.exp > now() ? data : null; } catch { return null; }
-}
-const cookieHeader = (value, maxAge = 28800) => COOKIE + "=" + value + "; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=" + maxAge;
 async function body(request) {
   const length = Number(request.headers.get("content-length") || 0);
   if (length > 16384) return { __invalid_body: true };
