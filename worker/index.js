@@ -418,7 +418,7 @@ export default {
       const pair = [match.a.reference,match.b.reference].sort().join(":");
       const known = await env.DB.prepare("SELECT pair FROM notifications WHERE pair=?").bind(pair).first();
       if (known) continue;
-      const sent = await sendTelegram("POSSIBLE DRIVER / CUSTOMER MATCH\\n\\n"+summary(match.a)+"\\n\\n"+summary(match.b)+"\\n\\nMatch: "+match.reason+"\\nAdmin: review manually. No customer phone numbers included.",env);
+      const sent = await sendTelegram("POSSIBLE DRIVER / CUSTOMER MATCH\n\n"+summary(match.a)+"\n\n"+summary(match.b)+"\n\nMatch: "+match.reason+"\nAdmin: review manually. No customer phone numbers included.",env);
       if (sent) { await env.DB.prepare("INSERT OR IGNORE INTO notifications(pair,created_at) VALUES(?,?)").bind(pair,new Date().toISOString()).run(); notified++; }
     }
     return harden(json({ok:true,expired,matched_pairs_notified:notified}));
