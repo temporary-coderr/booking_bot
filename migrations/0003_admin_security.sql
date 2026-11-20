@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   created_at TEXT NOT NULL,
   last_seen_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
-  session_version INTEGER NOT NULL
+  session_version INTEGER NOT NULL,
+  mfa_pending INTEGER NOT NULL DEFAULT 0 CHECK(mfa_pending IN (0,1))
 );
 CREATE INDEX IF NOT EXISTS idx_admin_sessions_admin ON admin_sessions(admin_id, expires_at);
 CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry ON admin_sessions(expires_at);
