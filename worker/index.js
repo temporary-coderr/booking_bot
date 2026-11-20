@@ -178,6 +178,7 @@ async function createBooking(request, env) {
   if (!["driver", "customer"].includes(role) || !b.name || b.phone.length < 10 || !b.origin || !b.destination || b.origin.toLowerCase() === b.destination.toLowerCase()) return json({ ok: false, error: "Please complete all required details and check your mobile number." }, 400);
   if (role === "driver" && (!["TRUCK", "PICKUP", "CAR", "OTHER"].includes(b.vehicle_type) || (["TRUCK", "PICKUP"].includes(b.vehicle_type) && !Number(b.capacity_kg)) || (b.vehicle_type === "CAR" && !Number(b.passenger_count)))) return json({ ok: false, error: "Please complete the vehicle details." }, 400);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(b.trip_date) || !/^\d{2}:\d{2}$/.test(b.trip_time)) return json({ ok: false, error: "Enter a valid travel date and time." }, 400);
+  if (bookingTime({trip_date:b.trip_date,trip_time:b.trip_time}) === null) return json({ ok:false,error:"Enter a real calendar date and time." },400);
   const tripKey = b.trip_date + "T" + b.trip_time, currentIndia = indiaNow();
   const tripMillis = Date.parse(tripKey + ":00Z"), currentMillis = Date.parse(currentIndia + ":00Z");
   if (!Number.isFinite(tripMillis) || tripKey <= currentIndia || tripMillis > currentMillis + 365 * 86400000) return json({ ok: false, error: "Past date or time is not allowed. Choose a future travel time." }, 400);
@@ -264,11 +265,30 @@ async function adminApi(request, env, path, session) {
   }
   if (method === "POST" && path === "/api/booking-update") {
     const fields = ["name","phone","origin","destination","via","trip_date","trip_time","role","vehicle_type","capacity_kg","passenger_count"];
-    const sets = [], values = []; for (const f of fields) if (d[f] !== undefined) { sets.push(f + "=?"); values.push(f === "phone" ? digits(d[f]) : clean(d[f], 500)); }
-    if (!d.id || !sets.length) return json({ ok: false, error: "No booking changes supplied." }, 400);
-    values.push(d.id); const r = await db.prepare("UPDATE bookings SET " + sets.join(",") + " WHERE id=?").bind(...values).run();
-    if (!r.meta?.changes) return json({ ok: false, error: "Booking not found." }, 404);
-    await activity(db, d.reference || "", "admin_edited"); await auditSecurity("booking_edited",d.reference||""); return json({ ok: true, booking: { updated: true } });
+    if (!d.id) return json({ok:false,error:"Booking ID is required."},400);
+    const current = await db.prepare("SELECT * FROM bookings WHERE id=?").bind(d.id).first();
+    if (!current) return json({ok:false,error:"Booking not found."},404);
+    const candidate = {...current};
+    const sets = [], values = [];
+    for (const field of fields) {
+      if (d[field] === undefined) continue;
+      let value = field === "phone" ? digits(d[field]) : clean(d[field], field === "via" ? 500 : field === "name" ? 80 : 100);
+      if (field === "role") value = String(value).toLowerCase();
+      if (field === "vehicle_type") value = String(value).toUpperCase();
+      candidate[field] = value;
+      sets.push(field + "=?"); values.push(value);
+    }
+    if (!sets.length) return json({ok:false,error:"No booking changes supplied."},400);
+    if (!["driver","customer"].includes(candidate.role) || !candidate.name || !candidate.origin || !candidate.destination || normalizeLocation(candidate.origin) === normalizeLocation(candidate.destination) || digits(candidate.phone).length < 10 || digits(candidate.phone).length > 15) return json({ok:false,error:"Check the booking name, mobile number and route."},400);
+    if (bookingTime(candidate) === null) return json({ok:false,error:"Enter a valid travel date and time."},400);
+    if (candidate.role === "driver" && !["TRUCK","PICKUP","CAR","OTHER"].includes(candidate.vehicle_type)) return json({ok:false,error:"Choose a valid vehicle type."},400);
+    if (candidate.role === "driver" && ["TRUCK","PICKUP"].includes(candidate.vehicle_type) && !(Number(candidate.capacity_kg) > 0 && Number(candidate.capacity_kg) <= 100000)) return json({ok:false,error:"Enter a valid vehicle capacity."},400);
+    if (candidate.role === "driver" && candidate.vehicle_type === "CAR" && !(Number(candidate.passenger_count) >= 1 && Number(candidate.passenger_count) <= 20)) return json({ok:false,error:"Enter a valid passenger count."},400);
+    values.push(d.id);
+    await db.prepare("UPDATE bookings SET " + sets.join(",") + " WHERE id=?").bind(...values).run();
+    await activity(db, d.reference || current.reference || "", "admin_edited");
+    await auditSecurity("booking_edited",d.reference||current.reference||"");
+    return json({ok:true,booking:{updated:true}});
   }
   if (method === "POST" && path === "/api/booking-status") {
     const allowed = ["pending","approved","rejected","completed","cancelled","closed","expired"];
