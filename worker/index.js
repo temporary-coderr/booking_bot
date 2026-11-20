@@ -361,6 +361,9 @@ export default {
    headers.set("X-Content-Type-Options","nosniff");
    headers.set("X-Frame-Options","DENY");
    headers.set("Referrer-Policy","no-referrer");
+   headers.set("Cross-Origin-Resource-Policy","same-origin");
+   headers.set("Cross-Origin-Opener-Policy","same-origin");
+   if(url.protocol==="https:") headers.set("Strict-Transport-Security","max-age=31536000; includeSubDomains");
    headers.set("Permissions-Policy","camera=(), microphone=(), geolocation=()");
    headers.set("Content-Security-Policy","default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
    if(path.startsWith("/api/") || path === String(env.ADMIN_PATH || "")) headers.set("Cache-Control","no-store");
@@ -395,7 +398,7 @@ export default {
   }
  },
  async scheduled(controller, env, ctx) {
-  ctx.waitUntil((async()=>{ const expired=await expireBookings(env.DB), r=await env.DB.prepare("SELECT * FROM bookings WHERE active=1").all(), matches=findMatches(r.results||[]);
+  ctx.waitUntil((async()=>{ await env.DB.prepare("DELETE FROM api_rate_limits WHERE window_started_at < ?").bind(new Date(now()-86400000).toISOString()).run(); await env.DB.prepare("DELETE FROM login_attempts WHERE window_started_at < ?").bind(new Date(now()-86400000).toISOString()).run(); const expired=await expireBookings(env.DB), r=await env.DB.prepare("SELECT * FROM bookings WHERE active=1").all(), matches=findMatches(r.results||[]);
    for(const m of matches){const pair=[m.a.reference,m.b.reference].sort().join(":");const known=await env.DB.prepare("SELECT pair FROM notifications WHERE pair=?").bind(pair).first();if(known)continue;const ok=await sendTelegram("POSSIBLE DRIVER / CUSTOMER MATCH\n\n"+summary(m.a)+"\n\n"+summary(m.b)+"\n\nMatch: "+m.reason+"\nAdmin: review manually. No customer phone numbers included.",env);if(ok)await env.DB.prepare("INSERT OR IGNORE INTO notifications(pair,created_at) VALUES(?,?)").bind(pair,new Date().toISOString()).run();}
   })());
  }
