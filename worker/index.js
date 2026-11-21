@@ -353,7 +353,7 @@ async function adminApi(request, env, path, session) {
     const encoder = new TextEncoder();
     const crc32 = bytes => { let c=0xffffffff; for(const b of bytes){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0);} return (c^0xffffffff)>>>0; };
     const chunks=[], central=[]; let offset=0;
-    const put16=(v,n)=>v.setUint16(n,0,true), put32=(v,n,x)=>v.setUint32(n,x>>>0,true);
+    const put16=(v,n,x)=>v.setUint16(n,x,true), put32=(v,n,x)=>v.setUint32(n,x>>>0,true);
     for(const [name,content] of files){
       const nb=encoder.encode(name), data=encoder.encode(content), crc=crc32(data);
       const local=new Uint8Array(30+nb.length), lv=new DataView(local.buffer);
